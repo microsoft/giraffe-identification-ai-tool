@@ -26,7 +26,7 @@
 This project aims to deliver a comprehensive, AI-powered giraffe photo re-identification tool tailored for both technical and non-technical users. Designed for scalability, it efficiently processes large datasets containing thousands of giraffe images with high accuracy. By automating key steps in catalog updates, the tool streamlines population tracking and enhances conservation efforts, supporting biodiversity research and the protection of giraffe populations in the wild.
 
 <div style="text-align: center;">
-    <img src="infographic/demo.gif" alt="Software Demo" width="80%">
+    <img src="infographic/demo.gif" alt="Software Demo" width="60%">
     <figcaption>Software Demo</figcaption>
 </div>
 
@@ -45,7 +45,7 @@ This project was developed at the Microsoft AI for Good Lab in collaboration wit
 6. **Reference Dataset Update**: Automatically update the reference dataset with new matching results from the AI model.
 
 <div style="text-align: center;">
-    <img src="infographic/Infographic.jpg" alt="AI Workflow Visualization Image" width="80%">
+    <img src="infographic/Infographic.jpg" alt="AI Workflow Visualization Image" width="60%">
     <figcaption>AI Workflow Visualization</figcaption>
 </div>
 
@@ -65,7 +65,7 @@ The following computer vision algorithms are used for data preprocessing:
 
 
 <div style="text-align: center;">
-    <img src="infographic/all_images.png" alt="Image Preprocessing Example" width="80%">
+    <img src="infographic/all_images.png" alt="Image Preprocessing Example" width="60%">
     <figcaption>Image Preprocessing Example</figcaption>
 </div>
 
@@ -78,41 +78,37 @@ We use the FAISS library for efficient similarity search and image descriptor re
 The user interface is designed as a multi-functional tool to simplify image batch processing and large-scale visualization, making AI-powered giraffe photo matching accessible to non-technical users. By eliminating the need for terminal interaction, it enables ecologists and researchers with minimal Python experience to complete their projects seamlessly. The UI streamlines the entire workflow—from data upload to database updates—while also allowing human experts to validate and refine results. This approach aims to democratize AI solutions for ecologists, ensuring that both inference and results validation are intuitive and efficient, even when ground truth data is available."
 
 <div style="text-align: center;">
-    <img src="infographic/ui_verify_reid.png" alt="User Interface Re-identification Verification Tab" width="80%">
+    <img src="infographic/ui_verify_reid.png" alt="User Interface Re-identification Verification Tab" width="60%">
     <figcaption>User Interface Tab: Re-identification Verification</figcaption>
 </div>
 
 <div style="text-align: center;">
-    <img src="infographic/ui_verify_new_id.png" alt="User Interface New Identifications Verification Tab" width="80%">
+    <img src="infographic/ui_verify_new_id.png" alt="User Interface New Identifications Verification Tab" width="60%">
     <figcaption>User Interface Tab: New Identifications Verification</figcaption>
 </div>
 
 
 ## **Performance Evaluation and Benchmarking**
 ### **Accuracy**
-In the giraffe re-identification task, we classify existing giraffes in the query input batch as positive items and new giraffes as negative items. To evaluate re-identification accuracy, we compute standard binary classification metrics. Additionally, for the subset of query data with re-identified labels, we report accuracy as accuracy_re_identified_items in the table below. To assess the partitioning accuracy of new, unknown giraffes, we use the Adjusted Rand Index, reported as adjusted_rand_index_partitioning in the table.
-
-The results for the data split on Wild Nature Institute's Masai giraffes are shown below, with 15,965 images used as reference data, 2,982 as known query images, and 1,734 as unknown query images.
-
-| **Thresholds**            | **Value** | **Dataset Size**               | **Value** | **Confusion Matrix** | **Value** |
-|:---------------------------------|:---------:|:-------------------------------|:---------:|:--------------------:|:---------:|
-| dist_re_id            |   inf     | items_in_ref             |  15,965   | TP                   |   2,894   |
-| counts_re_id          |    10     | num_of_queries        |  4,666    | TN                   |   1,467   |
-| dist_partitioning     |   0.06    | num_of_pos_queries    |  2,932    | FP                   |     38    |
-| counts_partitioning   |     4     | num_of_neg_queries    |  1,734    | FN                   |    267    |
+In the giraffe re-identification task, we classify existing giraffes in the query input batch as positive items and new giraffes as negative items. To evaluate re-identification accuracy, we compute standard binary classification metrics. Additionally, for the subset of query data with re-identified labels, we report accuracy in the table below. To assess the partitioning accuracy of new, unknown giraffes, we use the Adjusted Rand Index. The results for several data splits on Wild Nature Institute's Masai giraffes are shown below.
 
 
-| **Accuracy Metric**                  | **Value** |
-|:------------------------------------|:---------:|
-| precision_positive                  |   0.99    |
-| recall_positive                     |   0.92    |
-| f1_score_positive                   |   0.95    |
-| precision_negative                  |   0.85    |
-| recall_negative                     |   0.97    |
-| f1_score_negative                   |   0.91    |
-| overall_accuracy                    |   93%     |
-| accuracy_re_identified_items        |   99%     |
-| adjusted_rand_index_partitioning    |   0.80    |
+| Case                         | Data Split 1 | Data Split 2 | Data Split 3 |
+|------------------------------|-------------|-------------|-------------|
+| **Reference catalog**        | 20,687      | 15,965      | 7,000       |
+| **Query set**                | 4,666       | 4,666       | 4,666       |
+| **Unknown items in query set** | 1,470      | 1,505       | 1,990       |
+| **Known items in query set**  | 3,196       | 3,161       | 2,676       |
+| **Sharding**                 | No / Yes    | No / Yes    | No          |
+| **Overall accuracy**         | 95% / 95%   | 94% / 95%   | 95%         |
+| **Accuracy (re-identified items)** | 99% / 99% | 99% / 99% | 100%       |
+| **Recall (known)**           | 0.94 / 0.95 | 0.93 / 0.95 | 0.93        |
+| **Precision (known)**        | 0.98 / 0.97 | 0.98 / 0.97 | 0.98        |
+| **F1 score (known)**         | 0.96 / 0.96 | 0.96 / 0.96 | 0.95        |
+| **Recall (unknown)**         | 0.95 / 0.93 | 0.97 / 0.93 | 0.98        |
+| **Precision (unknown)**      | 0.88 / 0.90 | 0.87 / 0.90 | 0.91        |
+| **F1 score (unknown)**       | 0.92 / 0.92 | 0.92 / 0.92 | 0.94        |
+| **Adjusted Rand Index (partitioning)** | 0.82 / 0.83 | 0.81 / 0.83 | 0.82  |
 
 
 ### **Runtime**
