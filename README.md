@@ -27,7 +27,7 @@ This project aims to deliver a comprehensive, AI-powered giraffe photo re-identi
 
 <div style="text-align: center;">
     <img src="infographic/demo.gif" alt="Software Demo" width="60%">
-    <figcaption>Software Demo</figcaption>
+    <div style="font-size: 12px; margin-top: 5px; color: gray;">Software Demo</div>
 </div>
 
 
@@ -46,7 +46,7 @@ This project was developed at the Microsoft AI for Good Lab in collaboration wit
 
 <div style="text-align: center;">
     <img src="infographic/Infographic.jpg" alt="AI Workflow Visualization Image" width="60%">
-    <figcaption>AI Workflow Visualization</figcaption>
+    <div style="font-size: 12px; margin-top: 5px; color: gray;">AI Workflow Visualization</div>
 </div>
 
 While technical users can run individual scripts separately, we also provide a comprehensive User Interface (UI) to make the solution accessible and empower non-technical users. The UI allows users to access each module independently, visualize matching results, validate and refine results before updating the database. The UI runs each script via a button press within a tmux session, and logging is provided for monitoring both standard and error outputs. Non-technical users do not need to interact with the terminal. This interface can be seen as a batch query management tool for processing giraffe photos after each survey and data collection phase, enabling biodiversity research on population trends and survival rates.
@@ -66,7 +66,7 @@ The following computer vision algorithms are used for data preprocessing:
 
 <div style="text-align: center;">
     <img src="infographic/all_images.png" alt="Image Preprocessing Example" width="60%">
-    <figcaption>Image Preprocessing Example</figcaption>
+    <div style="font-size: 12px; margin-top: 5px; color: gray;">Image Preprocessing Example</div>
 </div>
 
 
@@ -79,12 +79,12 @@ The user interface is designed as a multi-functional tool to simplify image batc
 
 <div style="text-align: center;">
     <img src="infographic/ui_verify_reid.png" alt="User Interface Re-identification Verification Tab" width="60%">
-    <figcaption>User Interface Tab: Re-identification Verification</figcaption>
+    <div style="font-size: 12px; margin-top: 5px; color: gray;">User Interface Tab: Re-identification Verification</div>
 </div>
 
 <div style="text-align: center;">
     <img src="infographic/ui_verify_new_id.png" alt="User Interface New Identifications Verification Tab" width="60%">
-    <figcaption>User Interface Tab: New Identifications Verification</figcaption>
+    <div style="font-size: 12px; margin-top: 5px; color: gray;">User Interface Tab: New Identifications Verification</div>
 </div>
 
 
@@ -112,16 +112,15 @@ In the giraffe re-identification task, we classify existing giraffes in the quer
 
 
 ### **Runtime**
-On a Standard NC6s v3 Azure Linux machine (6 vCPUs, 112 GiB RAM) powered by NVIDIA Tesla V100 GPU, the expected runtime for each step is shown below.
+On a Standard NC6s v3 Azure Linux machine (6 vCPUs, 112 GiB RAM) powered by NVIDIA Tesla V100 GPU, the expected runtime for each step is shown below. Training FAISS index on reference dataset of 25,363 images takes ~11 mins.
 
-| Process                                            | Time per Image       |
-|----------------------------------------------------|----------------------|
-| Preprocess and store image | 1.7 sec              |
-| Generate image key points and descriptors using SIFT              | 0.13 sec             |
-| Training FAISS index on reference dataset          | 11 mins for ~26,000 images |
-| Conduct query matching for re-identification using trained FAISS index   | 0.03 sec             |
-| Conduct partitioning for unknown items by training a new FAISS index | 0.07 sec |
-| Update database with existing items                | 0.0075 sec           |
+| Process in Workflow                                              | Time per Query Image (Seconds) |
+|-----------------------------------------------------------------|-------------------------------|
+| **Preprocess and save image using segmentation and object detection models** | 1.7                           |
+| **Generate image key points and descriptors using SIFT**   | 0.13                          |
+| **Conduct query matching for re-identification using trained index** | 0.03                          |
+| **Conduct partitioning for unknown items by training a new index** | 0.07                          |
+| **Update database with existing items**                   | 0.0075                        |
 
 
 Total compute time for processing and matching a sample dataset provided by Wild Nature Institute is:
