@@ -1,0 +1,74 @@
+/* -------------------------------------------------------------------------
+ * Copyright (c) Microsoft Corporation. All rights reserved.
+ * Licensed under the MIT License.
+ * ------------------------------------------------------------------------- */
+
+#header {
+    font-family: SegoeUI, sans-serif;
+    position: relative;
+    width: 704px;
+    height: 390.35px;
+    margin: 0 auto;
+}
+
+#header-gradient {
+    position: absolute;
+    width: 100%;
+    height: 164px;
+    top: 66.35px;
+    background: linear-gradient(266.17deg, #FFE399 -19.87%, #D3B535 1.63%, #48B0FF 100.15%);
+}
+
+#header-container {
+    width: 100%;
+    height: 230.35px;
+    display: flex;
+    justify-content: flex-start;
+    align-items: flex-end;
+    color: #FFFFFF;
+}
+
+#giraffe-column {
+    flex: 1;
+    z-index: 1;
+}
+
+#giraffe-column img {
+    width: 252px;
+}
+
+#logo-column {
+    flex: 2;
+    z-index: 1;
+}
+
+#logo-column img {
+    width: 185px;
+}
+
+#logo-title {
+    font-weight: 600;
+    font-size: 56px;
+    line-height: 52px;
+    margin-top: 10.9px;
+}
+
+#logo-subtitle {
+    width: 275px;
+    height: 33px;
+    margin-top: 4px;
+    margin-bottom: 12.5px;
+    font-weight: 400;
+    font-size: 12px;
+    line-height: 16px;
+}
+
+#header-description {
+    width: 100%;
+    height: 112px;
+    margin-top: 48px;
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 28px;
+}
+

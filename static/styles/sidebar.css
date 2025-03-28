@@ -1,0 +1,104 @@
+/* -------------------------------------------------------------------------
+ * Copyright (c) Microsoft Corporation. All rights reserved.
+ * Licensed under the MIT License.
+ * ------------------------------------------------------------------------- */
+
+.stSidebar {
+    padding: 24px;
+    width: 320px;
+    box-sizing: border-box;
+    background-color: #FAFAFA;
+}
+
+.stSidebar ul li {
+    margin: 0;
+    padding: 0;
+}
+
+.stSidebar ul li a {
+    margin: 0;
+    padding: 6px 4px 6px 6px;
+
+    width: 240px;
+    height: 32px;
+
+    color: var(--Light-Foreground-Foreground-2, #424242);
+    font-family: SegoeUI;
+    font-size: 14px;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 20px;
+}
+
+.stSidebar ul li a::before {
+    display: inline-block;
+
+    content: '';
+    width: 20px;
+    height: 20px;
+    background-size: contain;
+    background-repeat: no-repeat;
+    vertical-align: middle;
+}
+
+.stSidebar ul li:nth-child(1)::after {
+    content: '';
+    display: block;
+    margin-top: 5px;
+    margin-bottom: 4px;
+    width: 240px;
+    height: 1px;
+    background: #E0E0E0;
+}
+
+.stSidebar ul li:nth-child(2)::before {
+    content: "Select a tool";
+    display: block;
+    padding: 8px 12px 8px 8px;
+
+    color: #616161;
+    font-family: SegoeUI;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px; 
+}
+
+.stSidebar ul li:nth-child(1) a::before {
+    background-image: url("app/static/icons/00_home.png");
+}
+
+.stSidebar ul li:nth-child(2) a::before {
+    background-image: url("app/static/icons/01_table.png");
+}
+
+.stSidebar ul li:nth-child(3) a::before {
+    background-image: url("app/static/icons/02_preprocess.png");
+}
+
+.stSidebar ul li:nth-child(4) a::before {
+    background-image: url("app/static/icons/03_runReID.png");
+}
+
+.stSidebar ul li:nth-child(5) a::before {
+    background-image: url("app/static/icons/04_verifyReID.png");
+}
+
+.stSidebar ul li:nth-child(6) a::before {
+    background-image: url("app/static/icons/05_identify.png");
+}
+
+.stSidebar ul li:nth-child(7) a::before {
+    background-image: url("app/static/icons/06_verifyNewID.png");
+}
+
+.stSidebar ul li:nth-child(8) a::before {
+    background-image: url("app/static/icons/07_update.png");
+}
+
+.stSidebar ul li:nth-child(9) a::before {
+    background-image: url("app/static/icons/08_validate.png");
+}
+
+.stSidebar ul li:nth-child(10) a::before {
+    background-image: url("app/static/icons/09_visualize.png");
+}

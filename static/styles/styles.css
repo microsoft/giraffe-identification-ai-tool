@@ -1,0 +1,14 @@
+/* -------------------------------------------------------------------------
+ * Copyright (c) Microsoft Corporation. All rights reserved.
+ * Licensed under the MIT License.
+ * ------------------------------------------------------------------------- */
+
+.radio-font-size {
+    font-size: 30px;  /* Adjust the font size as needed */
+    font-weight: bold;
+}
+
+.styled-divider {
+    border-top: 2px solid #e0e0e0;  /* Set a light gray line with desired thickness */
+    margin: 20px 0;  /* Add some spacing before and after */
+}

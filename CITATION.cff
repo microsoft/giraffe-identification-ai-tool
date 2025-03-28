@@ -1,0 +1,22 @@
+# -------------------------------------------------------------------------
+# Copyright (c) Microsoft Corporation. All rights reserved.
+# Licensed under the MIT License.
+# --------------------------------------------------------------------------
+
+cff-version: 1.0.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Gholami"
+  given-names: "Shahrzad"
+  orcid: "https://orcid.org/0000-0001-7338-8147"
+- family-names: "Lavista Ferres"
+  given-names: "Juan"
+  orcid: "https://orcid.org/0000-0002-9654-3178"
+- family-names: "Lee"
+  given-names: "Derek"
+  orcid: "https://orcid.org/0000-0002-1042-9543"
+title: "AI-powered Software for Identifying Individual Giraffes"
+version: 1.0.0
+date-released: 2025-04-01
+license: "MIT"
+url: "https://github.com/microsoft/giraffe-identification-ai-tool"

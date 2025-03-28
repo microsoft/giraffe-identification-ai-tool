@@ -1,0 +1,200 @@
+/* -------------------------------------------------------------------------
+ * Copyright (c) Microsoft Corporation. All rights reserved.
+ * Licensed under the MIT License.
+ * ------------------------------------------------------------------------- */
+
+.stMarkdown * {
+    font-family: SegoeUI, sans-serif;
+}
+
+.stMarkdown ul:first-of-type li a {
+    color: #242424;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 20px;
+    line-height: 38px;
+    vertical-align: middle;
+}
+
+.stMarkdown ul:first-of-type li a {
+    font-size: 20px;
+    font-weight: 400;
+    line-height: 28px;
+}
+
+.stMarkdown ul:first-of-type ul li a {
+    font-size: 18px;
+}
+
+.stMarkdown ul:first-of-type ul ul li a {
+    font-size: 16px;
+}
+
+.stMarkdown ul:first-of-type li a:hover {
+    text-decoration: underline;
+}
+
+.stMarkdown ul:first-of-type {
+    list-style-type: none;
+}
+
+.stMarkdown ul:first-of-type li {
+    padding: 0;
+    margin: 0;
+    margin-left: 10px;
+    margin-right: 10px;
+}
+
+.stMarkdown ul:first-of-type li:not(:has(> ul)) {
+    margin-left: 20px;
+    margin-right: 10px;
+}
+
+
+.stMarkdown ul:first-of-type li::before {
+    display: inline-block;
+
+    content: '';
+    width: 20px;
+    height: 20px;
+    transform: rotate(90deg);
+    background-image: url("app/static/icons/left_chevron.png");
+    background-size: contain;
+    background-repeat: no-repeat;
+    margin-right: 0.5em;
+    vertical-align: middle;
+}
+
+.stMarkdown ul:first-of-type li:not(:has(> ul))::before {
+    background-image: none;
+}
+
+.stMarkdown h1 {}
+
+.stMarkdown h2 {
+    font-size: 28px;
+    line-height: 36px;
+    font-weight: 600;
+    color: #000;
+    padding: 0;
+    margin-top: 24px;
+    margin-bottom: 24px;
+}
+
+.stMarkdown h3 {
+    font-size: 24px;
+    line-height: 32px;
+    font-weight: 600;
+    color: #000;
+    padding: 0;
+    margin-top: 24px;
+    margin-bottom: 24px;
+}
+
+.stMarkdown p {
+    font-size: 16px;
+    line-height: 22px;
+    font-weight: 400;
+    color: #000;
+    margin: 0;
+}
+
+.stMarkdown ol li {
+    font-size: 16px;
+    line-height: 22px;
+    font-weight: 400;
+    color: #000;
+    padding: 0;
+    margin: 18px 0px 12px 1.2em;
+}
+
+.stMarkdown ol ::marker {
+    font-size: 16px;
+    line-height: 22px;
+    font-weight: 700;
+    color: #000;
+}
+
+.stMarkdown ol li strong {
+    font-size: 16px;
+    line-height: 22px;
+    font-weight: 700;
+    color: #000;
+}
+
+.stMarkdown table * {
+    font-family: "Inter", sans-serif !important;
+}
+
+.stMarkdown table {
+    border-collapse: separate;
+    border-spacing: 0;
+    border-radius: 12px;
+    border: 1px solid #E9EAEB;
+    padding: 0;
+    margin: 0;
+    margin-top: 24px;
+    margin-bottom: 24px;
+    position: relative;
+    overflow-x: auto;
+    width: 100%;
+    box-shadow: 0px 1px 2px 0px rgba(10, 13, 18, 0.05);
+}
+
+.stMarkdown thead th {
+    font-size: 14px;
+    font-weight: 600;
+    color: #717680;
+
+    line-height: 18px;
+    padding: 12px 24px;
+
+    background-color: #FAFAFA;
+    white-space: nowrap;
+
+    border: 1px solid #E9EAEB;
+    border-left: none;
+    border-right: none;
+}
+
+.stMarkdown thead th:first-child {
+    border-top-left-radius: 12px;
+    border-left: 1px solid #E9EAEB;
+}
+
+.stMarkdown thead th:last-child {
+    border-top-right-radius: 12px;
+    border-right: 1px solid #E9EAEB;
+}
+
+.stMarkdown tbody td {
+    padding: 16px 24px;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+    color: #181D27;
+    border-bottom: 1px solid #E9EAEB;
+    border-right: none;
+    border-left: none;
+}
+
+.stMarkdown tbody td:first-child {
+    border-left: 1px solid #E9EAEB;
+}
+
+.stMarkdown tbody td:last-child {
+    border-right: 1px solid #E9EAEB;
+}
+
+.stMarkdown tbody td:nth-child(even) {
+    color: #535862 !important;
+    font-weight: 400;
+}
+
+.stMarkdown tbody tr:last-child td:first-child {
+    border-bottom-left-radius: 12px;
+}
+
+.stMarkdown tbody tr:last-child td:last-child {
+    border-bottom-right-radius: 12px;
+}

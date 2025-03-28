@@ -1,0 +1,18 @@
+# -------------------------------------------------------------------------
+# Copyright (c) Microsoft Corporation. All rights reserved.
+# Licensed under the MIT License.
+# --------------------------------------------------------------------------
+
+[Unit]
+Description=Streamlit App
+After=network.target
+
+[Service]
+User=derek
+Group=derek
+WorkingDirectory=/home/
+ExecStart=/usr/bin/bash /home/start_giraffe_ui.sh
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
