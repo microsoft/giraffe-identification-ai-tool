@@ -1,7 +1,4 @@
 
-<div style="text-align: center;">
-    <img src="../infographic/giraffe_banner.png" alt="Banner" width="100%">
-</div>
 
 # **Table of Contents**
 - [**Table of Contents**](#table-of-contents)
@@ -76,11 +73,6 @@ Traditional re-identification methods require extensive manual work, making larg
 
 By streamlining population tracking, **GIRAFFE** enhances conservation efforts and supports biodiversity research, contributing to the long-term protection of giraffe populations in the wild.
 
-<div style="text-align: center;">
-    <img src="../infographic/demo.gif" alt="Software Demo" width="60%">
-    <div style="font-size: 12px; margin-top: 5px; color: gray;">Software Demo</div>
-</div>
-
 
 ## **Partnership**
 This project was developed at the Microsoft AI for Good Lab in collaboration with Derek E. Lee, Ph.D., a quantitative ecologist, population biologist, and the Principal Scientist at the Wild Nature Institute to support [Masai Giraffe Conservation Project](https://www.wildnatureinstitute.org/giraffe.html).
@@ -103,11 +95,6 @@ Key contributions of our system include leveraging mode statistics to optimize m
 Evaluated on the Masai giraffe dataset, our approach enhances reliability by combining automated processing with expert oversight, enabling **accurate individual tracking and long-term conservation efforts**.  
 
 
-<div style="text-align: center;">
-    <img src="../infographic/Infographic.jpg" alt="AI Workflow Visualization Image" width="60%">
-    <div style="font-size: 12px; margin-top: 5px; color: gray;">AI Workflow Visualization</div>
-</div>
-
 While technical users can run individual scripts separately, we provide a **comprehensive User Interface (UI)** to make the solution accessible for non-technical users. The UI allows users to interact with each module independently, visualize matching results, and validate and refine outputs before updating the database. It simplifies execution by running scripts via button clicks within a **tmux session**, ensuring seamless logging for both standard and error outputs. Non-technical users can operate the system **without needing to interact with the terminal**. This interface effectively functions as a **batch query management tool**, streamlining the processing of giraffe photos after each survey and data collection phase to support biodiversity research on **population trends and survival rates**.  
 
 The **computer vision model** focuses on detecting the giraffe’s torso, minimizing background interference to enhance accuracy. Processed results are saved, creating a **reusable pool of image descriptors** for future identification tasks. Currently, we use **SIFT (Scale-Invariant Feature Transform)** to generate key points and descriptors for the matching algorithm, but the pipeline is designed to be adaptable to other feature extraction methods. To enable **efficient retrieval at scale**, we integrate **FAISS (Facebook AI Similarity Search)** allowing for fast nearest-neighbor searches in both re-identification and partitioning algorithms.
@@ -126,11 +113,6 @@ Our system employs advanced computer vision algorithms for data preprocessing, e
 3. **Reference Catalog Creation**:  
    To enable efficient matching, we construct a **reference dataset** containing annotated images of individual giraffes, focusing exclusively on **torso-only images** with backgrounds removed. Each new query image is compared against this dataset using SIFT, which extracts key points and descriptors for feature matching. If a match is found, the system assigns the corresponding ID; otherwise, a new ID can be generated, and the reference dataset is updated accordingly.
 
-
-<div style="text-align: center;">
-    <img src="../infographic/all_images.png" alt="Image Preprocessing Example" width="60%">
-    <div style="font-size: 12px; margin-top: 5px; color: gray;">Image Preprocessing Example</div>
-</div>
 
 
 ### **Vector Similarity Search**  
@@ -160,17 +142,6 @@ For cases where no matches were found in the reference dataset, this checkpoint 
 After unknown individuals have been identified, the partitioning algorithm clusters similar individuals together. This checkpoint enables experts to:  
 - **Compare clustered image groups side by side** to validate partitioning accuracy.  
 - **Ensure distinct groups represent unique individuals** before assigning labels.
-
-
-<div style="text-align: center;">
-    <img src="../infographic/ui_verify_reid.png" alt="User Interface Re-identification Verification Tab" width="60%">
-    <div style="font-size: 12px; margin-top: 5px; color: gray;">User Interface Tab: Re-identification Verification</div>
-</div>
-
-<div style="text-align: center;">
-    <img src="../infographic/ui_verify_new_id.png" alt="User Interface New Identifications Verification Tab" width="60%">
-    <div style="font-size: 12px; margin-top: 5px; color: gray;">User Interface Tab: New Identifications Verification</div>
-</div>
 
 
 ## **Performance Evaluation and Benchmarking**
@@ -534,11 +505,6 @@ data_root_abs_path = "/your/data/root/path/"
 
 ### **Step 3: Create a Metadata Table**
 Create a `metadata_query.csv` file with at least one mandatory column, `"path_relative_to_root"`, which specifies the paths of the images relative to the root directory, and one optional column, `"AID2021"`, which stores ground truth labels for testing and accuracy metrics. The `metadata_query.csv` file is updated at various stages to monitor results.  
-
-<div style="text-align: center;">
-    <img src="../infographic/sample_query_data.png" alt="Sample Query Table" width="20%">
-    <figcaption>Sample Query Table for Batch Processing</figcaption>
-</div>
 
 > [!TIP]
 > If you are using Azure Storage accounts and running multiple tests with different `metadata_query.csv` files, **do not overwrite existing files** directly using Azure Storage Explorer. Delete the old file before uploading a new one to avoid synchronization issues between the storage and the virtual machine (VM).
