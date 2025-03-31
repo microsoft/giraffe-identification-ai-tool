@@ -28,7 +28,7 @@
   - [**How to Process an Annotated Batch of Images as Reference Catalog?**](#how-to-process-an-annotated-batch-of-images-as-reference-catalog)
   - [**How to Process a Batch of Images for Querying Against a Catalog?**](#how-to-process-a-batch-of-images-for-querying-against-a-catalog)
     - [**Step 1: Upload a New Batch of Images and Reference Catalog**](#step-1-upload-a-new-batch-of-images-and-reference-catalog)
-    - [**Step 2: Set up the .env File**](#step-2-set-up-the-env-file)
+    - [**Step 2: Set Up .env File**](#step-2-set-up-env-file)
     - [**Step 3: Create a Metadata Table**](#step-3-create-a-metadata-table)
     - [**Step 4: Execute the Codes**](#step-4-execute-the-codes)
       - [**Option 1: Using the User Interface**](#option-1-using-the-user-interface)
@@ -319,8 +319,6 @@ data_root_directory/
   - **`/query_dir/logs/log__std_output__<workflow_step>__yyyy-mm-dd_hh-mm-ss.log`**: Logs standard output for a specific workflow step.  
 
 
-
-
 ## **How to Train and Use Giraffe Torso Detection Model?**
 To train a torso detection model, we used original and cropped images of giraffes to create annotations for an object detection task. The model was fine-tuned to detect giraffe torsos by splitting the data into training, validation, and test sets.
 
@@ -344,7 +342,7 @@ To create a reference dataset of annotated giraffe images for comparison with qu
 ### **Step 1: Upload a New Batch of Images and Reference Catalog**
 Set up a local directory for storing datasets or use Azure Storage Explorer to upload new images to the mounted storage account. For local storage, define the directory path in the `.env` file; for mounted storage, use `\mnt\`. Existing data can be retained, as query images are processed based on their filenames and paths (relative to the root directory) as listed in the `metadata_query.csv` file.
 
-### **Step 2: Set up the .env File**
+### **Step 2: Set Up .env File**
 ```bash
 # .env Configuration File  
 # Define environment variables for storage and data management  
@@ -418,7 +416,7 @@ The following hyperparameters are set by default in the configuration files for 
 
 1. **faiss_distance_cutoff_re_id** and **faiss_mode_cutoff_re_id**: Control the re-identification algorithms to accept or reject a match.
    - faiss_distance_cutoff_re_id (`inf`): Sets the maximum distance for retrieving nearest neighbors. With `inf`, no distance-based filtering is applied. 
-   - faiss_mode_cutoff_re_id (`10`): After distance filtering, only key points occurring at least 10 times are considered. The match with the highest number of such key points is selected as the best match.
+   - faiss_mode_cutoff_re_id (`5`): After distance filtering, only key points occurring at least 10 times are considered. The match with the highest number of such key points is selected as the best match.
   
 2. **faiss_distance_cutoff** and **faiss_mode_cutoff**: Control the new items partitioning process.
    - faiss_distance_cutoff (`0.062`): Sets the maximum distance for retrieving nearest neighbors.
