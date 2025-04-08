@@ -16,6 +16,9 @@ tensorboard==2.18.0
 regex==2024.5.15
 json5==0.10.0
 python-dotenv==1.0.1
+azure-identity==1.21.0
+azure-keyvault-secrets==4.9.0
+msal==1.32.0
 
 # Dependencies with CUDA support might not be available for your platform.
 # Below are the dependencies with CUDA support for Linux.

@@ -19,7 +19,8 @@
       - [**2. Review Unknown Individuals**](#2-review-unknown-individuals)
       - [**3. Review Partitioning of Unknown Individuals**](#3-review-partitioning-of-unknown-individuals)
   - [**Performance Evaluation and Benchmarking**](#performance-evaluation-and-benchmarking)
-    - [**Accuracy**](#accuracy)
+    - [**Accuracy: Re-identification of Known Items**](#accuracy-re-identification-of-known-items)
+    - [**Accuracy: Partitioning Algorithm for Uknown Items**](#accuracy-partitioning-algorithm-for-uknown-items)
     - [**Runtime**](#runtime)
   - [**Usage**](#usage)
   - [**Contributing**](#contributing)
@@ -141,8 +142,8 @@ After unknown individuals have been identified, the partitioning algorithm clust
 
 
 ## **Performance Evaluation and Benchmarking**
-### **Accuracy**
-In the giraffe re-identification task, we classify existing giraffes in the query input batch as positive items and new giraffes as negative items. To evaluate re-identification accuracy, we compute standard binary classification metrics. Additionally, for the subset of query data with re-identified labels, we report accuracy in the table below. To assess the partitioning accuracy of new, unknown giraffes, we use the Adjusted Rand Index. The results for several data splits on Wild Nature Institute's Masai giraffes are shown below.
+### **Accuracy: Re-identification of Known Items**
+In the giraffe re-identification task, we classify existing giraffes in the query input batch as positive items and new giraffes as negative items. To evaluate re-identification accuracy, we compute standard binary classification metrics. Additionally, for the subset of query data with re-identified labels, we report accuracy in the table below. The results for several data splits on Wild Nature Institute's Masai giraffes are shown below.
 
 
 | Case                         | Data Split 1 | Data Split 2 | Data Split 3 |
@@ -160,7 +161,17 @@ In the giraffe re-identification task, we classify existing giraffes in the quer
 | **Recall (unknown)**         | 0.95 / 0.93 | 0.97 / 0.93 | 0.98        |
 | **Precision (unknown)**      | 0.88 / 0.90 | 0.87 / 0.90 | 0.91        |
 | **F1 score (unknown)**       | 0.92 / 0.92 | 0.92 / 0.92 | 0.94        |
-| **Adjusted Rand Index (partitioning)** | 0.82 / 0.83 | 0.81 / 0.83 | 0.82  |
+
+### **Accuracy: Partitioning Algorithm for Uknown Items**
+To assess the partitioning accuracy of new, unknown giraffes, we use the Adjusted Rand Index. The results for several data splits on Wild Nature Institute's Masai giraffes are shown below.
+
+| Case                                                        | Data Split 1 | Data Split 2 | Data Split 3 |
+|-------------------------------------------------------------|--------------|--------------|--------------|
+| **Reference catalog (used for initialization option)**      | 7,000        | 7,000        | 7,000        |
+| **Detected as unknown items in query set (used in partitioning)** | 1,586  | 1,742        | 2,146        |
+| **Index initialization**                                    | No / Yes     | No / Yes     | No / Yes     |
+| **Adjusted Rand Index (partitioning)**                      | 0.82 / 0.98  | 0.81 / 0.98  | 0.83 / 0.98  |
+
 
 
 ### **Runtime**

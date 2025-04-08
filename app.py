@@ -7,6 +7,7 @@ import os
 import subprocess
 import streamlit as st
 from dotenv import load_dotenv
+from user_authentication import login_ui, authorize_users 
 
 load_dotenv()
 container_name, storage_account_name, mount_type, app_id, data_root_abs_path = map(os.getenv, 
@@ -85,8 +86,7 @@ def remove_if_empty(path):
     else:
         print(f"Directory {path} does not exist.")
 
-
-if __name__ == "__main__":
+def main():
     if data_root_abs_path == '/mnt/':
         # Mount data if not done already
         if not st.session_state.mounting_success:
@@ -98,23 +98,43 @@ if __name__ == "__main__":
         st.session_state.mounting_success = True
     st.session_state.root_dir, st.session_state.processed_img_dir = load_data_dirs()
 
+    if not st.session_state.get("authenticated", False):
+        st.markdown("""
+            <style>
+                [data-testid="stSidebar"] {
+                    display: none;
+                }
+            </style>
+        """, unsafe_allow_html=True)
+        login_ui()
+        return
 
-# Load global styles
-st.html(f'<style>{read_file(os.path.join(os.path.dirname(__file__), "static/styles/styles.css"))}</style>')
-st.html(f'<style>{read_file(os.path.join(os.path.dirname(__file__), "static/styles/sidebar.css"))}</style>')
-st.html(f'<style>{read_file(os.path.join(os.path.dirname(__file__), "static/styles/fonts.css"))}</style>')
+    # Load global styles
+    st.html(f'<style>{read_file(os.path.join(os.path.dirname(__file__), "static/styles/styles.css"))}</style>')
+    st.html(f'<style>{read_file(os.path.join(os.path.dirname(__file__), "static/styles/sidebar.css"))}</style>')
+    st.html(f'<style>{read_file(os.path.join(os.path.dirname(__file__), "static/styles/fonts.css"))}</style>')
 
-# Build the app
-app = st.navigation([
-    st.Page("st_pages/st_0_home.py", title="Home"),
-    st.Page("st_pages/st_1_create_query_table.py", title="Create Query Table"),
-    st.Page("st_pages/st_2_preprocess_images.py", title="Preprocess Images"),
-    st.Page("st_pages/st_3_run_reidentification.py", title="Run Reidentification"),
-    st.Page("st_pages/st_4_verify_reidentification.py", title="Verify Reidentification"),
-    st.Page("st_pages/st_5_identify_unknown_individuals.py", title="Identify Unknown"),
-    st.Page("st_pages/st_6_verify_new_identifications.py", title="Verify New IDs"),
-    st.Page("st_pages/st_7_update_catalogue.py", title="Update Catalogue"),
-    st.Page("st_pages/st_8_validate_based_on_ground_truth.py", title="Validate Ground Truth"),
-    st.Page("st_pages/st_9_visualize_single_image.py", title="Visualize Image")
-])
-app.run()
+    # Build the app
+    app = st.navigation([
+        st.Page("st_pages/st_0_home.py", title="Home"),
+        st.Page("st_pages/st_1_create_query_table.py", title="Create Query Table"),
+        st.Page("st_pages/st_2_preprocess_images.py", title="Preprocess Images"),
+        st.Page("st_pages/st_3_run_reidentification.py", title="Run Reidentification"),
+        st.Page("st_pages/st_4_verify_reidentification.py", title="Verify Reidentification"),
+        st.Page("st_pages/st_5_identify_unknown_individuals.py", title="Identify Unknown"),
+        st.Page("st_pages/st_6_verify_new_identifications.py", title="Verify New IDs"),
+        st.Page("st_pages/st_7_update_catalogue.py", title="Update Catalogue"),
+        st.Page("st_pages/st_8_validate_based_on_ground_truth.py", title="Validate Ground Truth"),
+        st.Page("st_pages/st_9_visualize_single_image.py", title="Visualize Image")
+    ])
+    app.run()
+        
+
+if __name__ == "__main__":
+    if not authorize_users():
+        print("Not authorizing")
+        st.session_state["authenticated"] = True   
+
+    if "authenticated" not in st.session_state:
+        st.session_state["authenticated"] = False   
+    main()

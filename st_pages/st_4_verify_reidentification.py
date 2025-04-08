@@ -14,6 +14,20 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from configs.config_matching import pipeline_code_relative_dir
 from utils.helpers_matching import load_data_dirs, load_metadata_file
 
+from user_authentication import login_ui, authorize_users
+
+# Check authentication status and redirect to login if not authenticated
+if authorize_users() and not st.session_state.get("authenticated", False):
+    # Add CSS to hide sidebar
+    st.markdown("""
+        <style>
+            [data-testid="stSidebar"] {
+                display: none;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+    login_ui()
+    st.stop() 
 
 st.title("Review & Revise Re-identification Results")
 st.html("""

@@ -28,13 +28,13 @@
   - [**How to Process an Annotated Batch of Images as Reference Catalog?**](#how-to-process-an-annotated-batch-of-images-as-reference-catalog)
   - [**How to Process a Batch of Images for Querying Against a Catalog?**](#how-to-process-a-batch-of-images-for-querying-against-a-catalog)
     - [**Step 1: Upload a New Batch of Images and Reference Catalog**](#step-1-upload-a-new-batch-of-images-and-reference-catalog)
-    - [**Step 2: Set Up .env File**](#step-2-set-up-env-file)
+    - [**Step 2: Set Up `.env` File**](#step-2-set-up-env-file)
     - [**Step 3: Create a Metadata Table**](#step-3-create-a-metadata-table)
     - [**Step 4: Execute the Codes**](#step-4-execute-the-codes)
       - [**Option 1: Using the User Interface**](#option-1-using-the-user-interface)
       - [**Option 2: Using Python Scripts**](#option-2-using-python-scripts)
     - [**Step 5: Monitor and Export Results**](#step-5-monitor-and-export-results)
-  - [**Default Hyperparameters and Configuration Settings**](#default-hyperparameters-and-configuration-settings)
+  - [**Default System Parameters and Configuration Settings**](#default-system-parameters-and-configuration-settings)
   - [**Updates in Query Metadata File as Pipeline Progresses**](#updates-in-query-metadata-file-as-pipeline-progresses)
     - [New columns | conducting image preprocessing](#new-columns--conducting-image-preprocessing)
     - [New columns | obtaining image representations via SIFT](#new-columns--obtaining-image-representations-via-sift)
@@ -43,6 +43,7 @@
     - [New columns | evaluating accuracy metrics if ground truth available](#new-columns--evaluating-accuracy-metrics-if-ground-truth-available)
     - [New columns | expert review and refinement of AI results](#new-columns--expert-review-and-refinement-of-ai-results)
     - [New columns | updating reference catalog with processd query images](#new-columns--updating-reference-catalog-with-processd-query-images)
+  - [**User Authentication**](#user-authentication)
 
 ## **Software Dependencies**
 
@@ -110,6 +111,7 @@ code_directory/
 |__ requirements.txt
 |__ README.md
 |__ setup_pipeline.sh
+|__ user_authentication.py
 |__ .env
 ```
 
@@ -127,7 +129,10 @@ code_directory/
   Required libraries and framework to run the codes.
 
 - **`/setup_pipeline.sh`**  
-  A general-purpose script for automating the pipeline execution. Can be customized to run specific steps or the entire workflow.  
+  A general-purpose script for automating the pipeline execution. Can be customized to run specific steps or the entire workflow.
+
+- **`/user_authentication.py`**  
+  Python script used for securing the application with Microsoft Azure Active Directory.  
 
 #### **Subdirectory | Object Detection**
 - **`/object_detection/trainer.py`**  
@@ -342,25 +347,30 @@ To create a reference dataset of annotated giraffe images for comparison with qu
 ### **Step 1: Upload a New Batch of Images and Reference Catalog**
 Set up a local directory for storing datasets or use Azure Storage Explorer to upload new images to the mounted storage account. For local storage, define the directory path in the `.env` file; for mounted storage, use `\mnt\`. Existing data can be retained, as query images are processed based on their filenames and paths (relative to the root directory) as listed in the `metadata_query.csv` file.
 
-### **Step 2: Set Up .env File**
+### **Step 2: Set Up `.env` File**
+
+Create a `.env` file in the root of your project directory to configure environment variables for storage, authentication, and data access.
+
 ```bash
 # .env Configuration File  
-# Define environment variables for storage and data management  
+# Define environment variables for storage, authentication, and data management  
 
-# Name of the container in the storage account  
-container_name = "your-container-name"  
+# [Storage Configuration]
+container_name = "your-container-name"              # Name of the container in the storage account  
+storage_account_name = "your-storage-account-name"  # Name of the storage account  
+mount_type = "your-mount-type"                      # Storage mount type (e.g., 'adls' for Azure Data Lake Storage)  
+data_root_abs_path = "/your/data/root/path/"        # Absolute path to the root data directory (mounted or local)  
 
-# Name of the storage account  
-storage_account_name = "your-storage-account-name"  
+# [App Registration / Authentication]
+app_id = "your-app-id"                              # Application ID for authentication (if required)  
+authenticate_users = "True"                         # Set to "True" to enable user authentication, otherwise "False"  
+client_id = "your-client-id"                        # Azure AD client ID used for authentication  
+tenant_id = "your-tenant-id"                        # Azure AD tenant ID  
+redirect_uri = "your-redirect-uri"                  # Redirect URI registered in your Azure AD app  
 
-# Storage mount type (e.g., 'adls' for Azure Data Lake Storage)  
-mount_type = "your-mount-type"  
-
-# Application ID for authentication (if required)  
-app_id = "your-app-id"  
-
-# Absolute path to the root data directory (mounted or local)  
-data_root_abs_path = "/your/data/root/path/"  
+# [Key Vault Access]
+key_vault_url = "your-key-vault-url"                # URL of the Azure Key Vault instance  
+secret_name = "your-secret-name"                    # Name of the secret in Key Vault used for credentials or keys  
 ```
 
 ### **Step 3: Create a Metadata Table**
@@ -411,23 +421,23 @@ After running each stage, two log files are generated to provide insights into p
 > - Avoid opening log files before a job finishes, as this may interrupt execution.
 > - Monitor memory and CPU usage in the Azure portal for the VM to gain insights into the experiment's execution status.
 
-## **Default Hyperparameters and Configuration Settings**
-The following hyperparameters are set by default in the configuration files for matching algorithms. These can be adjusted to optimize performance based on your use case or desired results.
+## **Default System Parameters and Configuration Settings**
 
-1. **faiss_distance_cutoff_re_id** and **faiss_mode_cutoff_re_id**: Control the re-identification algorithms to accept or reject a match.
+The default system parameters provided in the configuration files are optimized based on extensive empirical analysis of the Masai giraffe dataset, which contains several thousand images. These values are intended to automate the matching algorithms effectively, but they can be fine-tuned to suit your specific dataset or objectives. For best results across both tasks, we recommend initializing the reference catalog with **7,000 to 15,000 images**. This range offers a strong balance between achieving high matching accuracy and reducing the workload for expert validation through the user interface. If you are working with a limited dataset, we encourage incorporating [publicly available giraffe datasets](https://github.com/WildlifeDatasets/wildlife-datasets) to enhance the performance and generalizability of the proposed matching approach.
+
+1. **faiss_distance_cutoff_re_id** and **faiss_mode_cutoff_re_id**: Control the re-identification algorithms to accept or reject a match automaticaly.
    - faiss_distance_cutoff_re_id (`inf`): Sets the maximum distance for retrieving nearest neighbors. With `inf`, no distance-based filtering is applied. 
-   - faiss_mode_cutoff_re_id (`5`): After distance filtering, only key points occurring at least 10 times are considered. The match with the highest number of such key points is selected as the best match.
+   - faiss_mode_cutoff_re_id (`5`): After distance filtering, only key points labels occurring at least 5 times are considered as a qualified match. The match with the highest number of such key points is selected as the best match.
   
 2. **faiss_distance_cutoff** and **faiss_mode_cutoff**: Control the new items partitioning process.
-   - faiss_distance_cutoff (`0.062`): Sets the maximum distance for retrieving nearest neighbors.
-   - faiss_mode_cutoff (`4`): After distance filtering, only key points occurring 
-   - At least 4 times are considered. The match with the highest number of such key points is selected as the best match.
+   - faiss_distance_cutoff (`inf`): Sets the maximum distance for retrieving nearest neighbors.
+   - faiss_mode_cutoff (`5`): After distance filtering, only key points occurring at least 5 times are considered. The match with the highest number of such key points is selected as the best match.
 
 3. **num_recommended_ids** (`3`): This parameter controls how many IDs are recommended by the system after the comparison.
 
-4. **cropped_img_size** (`512`): This parameter defines the size of the images after cropping before they are fed into SIFT model.
+2. **cropped_img_size** (`512`): This parameter defines the size of the images after cropping before they are fed into SIFT model.
   
-5. **n_features** (`1500`): This parameter defines the maximum number of key points found for images when SIFT model applies.
+3. **n_features** (`1500`): This parameter defines the maximum number of key points found for images when SIFT model applies.
 
 
 ## **Updates in Query Metadata File as Pipeline Progresses**
@@ -472,3 +482,25 @@ These columns record the human intervention stage. By setting `auto_accept_model
 - **final_update_status**: Indicates the update status of the reference database.
 - **reference_pkl_file**: The updated reference `.pkl` file used for future matching.
 - **metadata_reference.csv**: The updated `metadata_reference.csv` file, which includes new matching results and updates to existing entries.
+
+## **User Authentication**
+
+This application is secured using Microsoft Azure Active Directory. Only users who have access to the Azure tenant will be allowed.
+
+This feature is set to on, but can be easily configured to be off, just change the `.env` file seting to be `authenticate_users = False`
+
+When the setting is set to True, there are additional variables to configure in the `.env` file:
+
+```
+client_id = "your_client_id"
+tenant_id = "your_tenant_id"
+redirect_uri = "your_app_url"
+key_vault_url = "your_key_vault_url"
+secret_name = "your_secret_name"
+```
+
+You need to create an App Registration and configure it, see detailed instructions on how to do that [here](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app?tabs=certificate%2Cexpose-a-web-api). The redirect URL should be the virtual machine DNS or worst case the IP address.
+
+To be able to get the values to replace here you must have a Key Vaul resource that holds your secret. You can see more about this [here](https://learn.microsoft.com/en-us/azure/key-vault/secrets/quick-create-portal). Create a secret with the secret value you got when creating the app registration. This name is the one you should use in `secret_name`.
+
+For any change done to the environment file you will need to restart the app.

@@ -13,6 +13,21 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from configs.config_matching import pipeline_code_relative_dir, demo_images
 from utils.helpers_matching import get_img_paths_from_a_folder
 
+from user_authentication import login_ui, authorize_users
+
+# Check authentication status and redirect to login if not authenticated
+if authorize_users() and not st.session_state.get("authenticated", False):
+    # Add CSS to hide sidebar
+    st.markdown("""
+        <style>
+            [data-testid="stSidebar"] {
+                display: none;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+    login_ui()
+    st.stop() 
+    
 st.title("Create Query Table from Image Directory")
 
 pipeline_code_dir = os.path.join(str(Path(__file__).resolve().parent.parent), str(pipeline_code_relative_dir))

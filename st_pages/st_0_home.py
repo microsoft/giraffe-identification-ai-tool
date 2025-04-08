@@ -12,6 +12,21 @@ sys.path.append(parent_dir)
 from configs.config_matching import demo_images, readme_ui_file
 from utils.utils_files import read_file
 
+from user_authentication import login_ui, authorize_users
+
+# Check authentication status and redirect to login if not authenticated
+if authorize_users() and not st.session_state.get("authenticated", False):
+    # Add CSS to hide sidebar
+    st.markdown("""
+        <style>
+            [data-testid="stSidebar"] {
+                display: none;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+    login_ui()
+    st.stop() 
+    
 # Load styles
 st.html(f'<style>{read_file(os.path.join(parent_dir, "static/styles/header.css"))}</style>')
 st.html(f'<style>{read_file(os.path.join(parent_dir, "static/styles/markdown.css"))}</style>')
