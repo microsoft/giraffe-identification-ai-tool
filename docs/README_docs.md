@@ -393,8 +393,7 @@ Access the application by running:
 ```bash
 streamlit run app.py
 ```
-Alternatively, turn on the VM and navigate to the following link (ensure your IP is added to the network security settings):  
-[AI Tool User Interface](http://giraffetrack.northeurope.cloudapp.azure.com:8088/)  
+Alternatively, turn on the VM and navigate to the user interface link (ensure your IP is added to the network security settings):
 
 > [!TIP]
 > **Important Notes:**  

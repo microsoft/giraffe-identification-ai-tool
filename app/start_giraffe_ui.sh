@@ -16,5 +16,5 @@ source /anaconda/etc/profile.d/conda.sh
 
 # Activate the conda environment
 conda activate $conda_env_full_path
-
-streamlit run $streamlit_app_file_path  --server.port 8088
+cd $streamlit_app_file_path
+streamlit run app.py  --server.port 8501
