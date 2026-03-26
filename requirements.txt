@@ -4,7 +4,7 @@ opencv-python==4.10.0.84
 opencv-python-headless==4.10.0.84
 pycocotools==2.0.8
 faiss-cpu==1.8.0.post1
-streamlit==1.43.0
+streamlit==1.54.0
 torchaudio==0.10.1
 tqdm==4.66.4
 Pillow==11.1.0
