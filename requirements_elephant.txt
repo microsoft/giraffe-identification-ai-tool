@@ -1,0 +1,60 @@
+# Elephant re-ID pipeline — pinned dependencies (Phase 0 validated 2026-06-30)
+#
+# Install:
+#   pip install -r requirements_elephant.txt
+#
+# Notes:
+# - lightglue is GitHub-only (not on PyPI); pinned to commit eb42fee2
+# - Use opencv-python-headless only (NOT opencv-python); the GUI build needs GTK
+#   which is absent on headless servers. lightglue/wildlife-tools declare
+#   opencv-python as a dep but the headless variant satisfies it at runtime.
+# - Our azure/ directory has no __init__.py so Python treats it as a namespace
+#   package, allowing both azure.blob_client/cosmos_client and the Azure SDK
+#   (azure.identity, azure.storage.blob, azure.cosmos) to coexist.
+#
+# After pip install, verify with:
+#   python -c "import torch, wildlife_tools, kornia, lightglue, faiss; print('ok')"
+
+# Core ML
+torch==2.12.1
+torchvision==0.27.1
+torchaudio==2.11.0
+
+# Wildlife re-ID model libraries
+wildlife-tools==0.0.9
+timm==1.0.27
+huggingface_hub==1.21.0
+transformers==5.12.1
+
+# Local feature matching (GitHub-only; no PyPI release)
+lightglue @ git+https://github.com/cvg/LightGlue.git@eb42fee2d71449efb0aa5c10549752b5d75384d8
+
+# FAISS (GPU variant; use faiss-cpu for non-GPU environments)
+faiss-gpu==1.14.3
+
+# Local feature matching backbone
+kornia==0.8.3
+
+# Azure SDKs (Entra ID auth — no connection strings)
+azure-identity==1.25.1
+azure-storage-blob==12.27.1
+azure-cosmos==4.16.1
+azure-keyvault-secrets==4.11.0
+
+# Data / numerics
+numpy==2.5.0
+pandas==3.0.1
+scipy==1.18.0
+scikit-learn==1.9.0
+pyarrow==24.0.0
+
+# Image processing — headless ONLY (no GTK dependency)
+Pillow==12.2.0
+opencv-python-headless==4.13.0.92
+
+# Utilities
+tqdm==4.66.4
+python-dotenv==1.2.2
+psutil==5.9.0
+matplotlib==3.11.0
+streamlit==1.58.0

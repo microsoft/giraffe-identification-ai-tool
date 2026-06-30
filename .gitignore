@@ -402,6 +402,7 @@ FodyWeavers.xsd
 
 # Environments
 **/.env*
+!.env.template
 **/.venv
 **/.vscode
 **/env/
@@ -409,3 +410,9 @@ FodyWeavers.xsd
 **/ENV/
 **/env.bak/
 **/venv.bak/
+
+# Downloaded datasets (large binaries — do not commit)
+data/elephant-images/
+# Derived tables may contain sensitive elephant GPS locations — keep out of VCS
+data/*.csv
+data/*.xlsx
