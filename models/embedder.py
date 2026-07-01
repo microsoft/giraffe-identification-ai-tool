@@ -87,7 +87,24 @@ class GlobalEmbedder:
 
     def _load_miewid(self) -> torch.nn.Module:
         from transformers import AutoModel
-        model = AutoModel.from_pretrained(self.model_id, trust_remote_code=True)
+        from transformers.modeling_utils import PreTrainedModel
+
+        # MiewIdNet (trust_remote_code) was written before transformers added post_init().
+        # post_init() sets all_tied_weights_keys which _move_missing_keys_from_meta_to_device
+        # expects. Patch the method to be safe when the attribute is missing.
+        original = PreTrainedModel._move_missing_keys_from_meta_to_device
+
+        def _safe(self_m, missing_keys, *args, **kwargs):
+            if not hasattr(self_m, "all_tied_weights_keys"):
+                self_m.all_tied_weights_keys = {}
+            return original(self_m, missing_keys, *args, **kwargs)
+
+        PreTrainedModel._move_missing_keys_from_meta_to_device = _safe
+        try:
+            model = AutoModel.from_pretrained(self.model_id, trust_remote_code=True)
+        finally:
+            PreTrainedModel._move_missing_keys_from_meta_to_device = original
+
         model = model.to(self.device)
         logger.info("miewid loaded via transformers.AutoModel.")
         return model
