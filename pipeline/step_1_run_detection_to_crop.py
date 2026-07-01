@@ -9,6 +9,7 @@ import pstats
 import cProfile
 import argparse
 import cv2
+import numpy as np
 from tqdm import tqdm
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -49,7 +50,9 @@ def run_detection(metadata_table, metadata_filepath, input_img_dir, processed_im
     os.makedirs(zoomed_dir, exist_ok=True)
     os.makedirs(ear_crop_dir, exist_ok=True)
     metadata_table["ai_found_torso"] = metadata_table["ai_found_torso"].astype(object)
-    metadata_table["ai_found_ear"] = metadata_table.get("ai_found_ear", "False").astype(object)
+    if "ai_found_ear" not in metadata_table.columns:
+        metadata_table["ai_found_ear"] = np.nan
+    metadata_table["ai_found_ear"] = metadata_table["ai_found_ear"].astype(object)
 
     for idx, row in tqdm(metadata_table.iterrows(), total=metadata_table.shape[0]):
 
@@ -63,8 +66,13 @@ def run_detection(metadata_table, metadata_filepath, input_img_dir, processed_im
             metadata_table.loc[idx, "ai_found_torso"] = "file_not_found"
             continue
 
-        if _check_if_processed_image_exists(path_rel, processed_img_dir):
+        body_crop_exists = _check_if_processed_image_exists(path_rel, processed_img_dir)
+        ear_crop_path    = _ear_crop_output_path(path_rel, ear_crop_dir)
+        ear_crop_exists  = os.path.isfile(ear_crop_path)
+
+        if body_crop_exists and ear_crop_exists:
             metadata_table.loc[idx, "ai_found_torso"] = "existing_item"
+            metadata_table.loc[idx, "ai_found_ear"]   = "existing_item"
             continue
 
         image_bgr = cv2.imread(full_path)
@@ -72,27 +80,32 @@ def run_detection(metadata_table, metadata_filepath, input_img_dir, processed_im
             metadata_table.loc[idx, "ai_found_torso"] = "file_not_found"
             continue
 
-        crop, viewpoint = detector.crop(image_bgr)
-        metadata_table.loc[idx, VIEWPOINT_COL] = viewpoint
+        if body_crop_exists:
+            # Whole-body crop already saved — load it for ear detection
+            crop_resized = cv2.imread(_crop_output_path(path_rel, processed_img_dir))
+            metadata_table.loc[idx, "ai_found_torso"] = "existing_item"
+        else:
+            crop, viewpoint = detector.crop(image_bgr)
+            metadata_table.loc[idx, VIEWPOINT_COL] = viewpoint
 
-        if crop is not None:
-            # Resize to square crop_size × crop_size (same output contract as original step_1)
+            if crop is None:
+                metadata_table.loc[idx, "ai_found_torso"] = "False"
+                metadata_table.loc[idx, "ai_found_ear"]   = "False"
+                continue
+
             crop_resized = cv2.resize(crop, (crop_size, crop_size))
             out_path = _crop_output_path(path_rel, processed_img_dir)
             cv2.imwrite(out_path, crop_resized)
             metadata_table.loc[idx, "ai_found_torso"] = "True"
 
-            # Ear detection on the whole-body crop
+        # Ear detection on the whole-body crop (skip if already done)
+        if not ear_crop_exists:
             ear_crop = ear_detector.detect_ear(crop_resized)
             if ear_crop is not None:
-                ear_out_path = _ear_crop_output_path(path_rel, ear_crop_dir)
-                cv2.imwrite(ear_out_path, ear_crop)
+                cv2.imwrite(ear_crop_path, ear_crop)
                 metadata_table.loc[idx, "ai_found_ear"] = "True"
             else:
                 metadata_table.loc[idx, "ai_found_ear"] = "False"
-        else:
-            metadata_table.loc[idx, "ai_found_torso"] = "False"
-            metadata_table.loc[idx, "ai_found_ear"] = "False"
 
     return metadata_table
 
