@@ -14,8 +14,8 @@ from tqdm import tqdm
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from utils.helpers_matching import print_memory_usage, log_to_file, restore_stdout
 from utils.helpers_matching import load_data_dirs, load_metadata_file
-from models.detector import ElephantDetector
-from configs.config_elephant import VIEWPOINT_COL, CROP_SUBDIR
+from models.detector import ElephantDetector, EarDetector
+from configs.config_elephant import VIEWPOINT_COL, CROP_SUBDIR, EAR_CROP_SUBDIR
 
 
 def _crop_output_path(path_relative_to_root: str, processed_img_dir: str) -> str:
@@ -30,15 +30,26 @@ def _crop_output_path(path_relative_to_root: str, processed_img_dir: str) -> str
     )
 
 
+def _ear_crop_output_path(path_relative_to_root: str, ear_crop_dir: str) -> str:
+    parts = path_relative_to_root.rsplit(".", 1)
+    ext = parts[1] if len(parts) == 2 else "jpg"
+    img_filename = os.path.basename(path_relative_to_root)
+    stem = img_filename.rsplit(".", 1)[0]
+    return os.path.join(ear_crop_dir, f"{stem}_ear_cropped.{ext}")
+
+
 def _check_if_processed_image_exists(path_relative_to_root: str, processed_img_dir: str) -> bool:
     return os.path.isfile(_crop_output_path(path_relative_to_root, processed_img_dir))
 
 
-def run_detection(metadata_table, metadata_filepath, input_img_dir, processed_img_dir, detector, crop_size):
+def run_detection(metadata_table, metadata_filepath, input_img_dir, processed_img_dir, detector, ear_detector, crop_size):
 
     zoomed_dir = os.path.join(processed_img_dir, "zoomed_version")
+    ear_crop_dir = os.path.join(processed_img_dir, "ear_crops")
     os.makedirs(zoomed_dir, exist_ok=True)
+    os.makedirs(ear_crop_dir, exist_ok=True)
     metadata_table["ai_found_torso"] = metadata_table["ai_found_torso"].astype(object)
+    metadata_table["ai_found_ear"] = metadata_table.get("ai_found_ear", "False").astype(object)
 
     for idx, row in tqdm(metadata_table.iterrows(), total=metadata_table.shape[0]):
 
@@ -70,8 +81,18 @@ def run_detection(metadata_table, metadata_filepath, input_img_dir, processed_im
             out_path = _crop_output_path(path_rel, processed_img_dir)
             cv2.imwrite(out_path, crop_resized)
             metadata_table.loc[idx, "ai_found_torso"] = "True"
+
+            # Ear detection on the whole-body crop
+            ear_crop = ear_detector.detect_ear(crop_resized)
+            if ear_crop is not None:
+                ear_out_path = _ear_crop_output_path(path_rel, ear_crop_dir)
+                cv2.imwrite(ear_out_path, ear_crop)
+                metadata_table.loc[idx, "ai_found_ear"] = "True"
+            else:
+                metadata_table.loc[idx, "ai_found_ear"] = "False"
         else:
             metadata_table.loc[idx, "ai_found_torso"] = "False"
+            metadata_table.loc[idx, "ai_found_ear"] = "False"
 
     return metadata_table
 
@@ -92,12 +113,13 @@ def main(partition):
     import torch
     device = "cuda" if torch.cuda.is_available() else "cpu"
     detector = ElephantDetector(backend="megadetector", conf=0.5, device=device)
+    ear_detector = EarDetector(device=device)
 
     # crop_size default mirrors the giraffe pipeline's cropped_img_size
     crop_size = 512
 
     metadata_table = run_detection(
-        metadata_table, metadata_filepath, input_img_dir, processed_img_dir, detector, crop_size
+        metadata_table, metadata_filepath, input_img_dir, processed_img_dir, detector, ear_detector, crop_size
     )
 
     metadata_table.to_csv(metadata_filepath, index=False)

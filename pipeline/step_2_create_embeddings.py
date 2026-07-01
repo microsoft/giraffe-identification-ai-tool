@@ -25,6 +25,8 @@ from configs.config_elephant import (
     FAISS_SUBDIR,
     INDEX_PARQUET_FILENAME,
     CROP_SUBDIR,
+    EAR_CROP_SUBDIR,
+    EAR_DESCRIPTORS,
     ID_COL,
     IMAGE_ID_COL,
     VIEWPOINT_COL,
@@ -40,20 +42,25 @@ _BATCH_SIZE = 32
 # Crop path helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_crop_path(row: pd.Series, root_dir: str) -> str:
+def _resolve_crop_path(row: pd.Series, root_dir: str, desc: str = "") -> str:
     """
     Returns the on-disk crop path for a metadata row.
-    Uses 'crop_path' column if present; otherwise reconstructs from the
-    original path using the same naming convention as step_1.
+    For ear descriptors, returns the GroundingDINO ear crop path.
+    For body descriptors, uses 'crop_path' column if present, otherwise
+    reconstructs from the original path using the same naming convention as step_1.
     """
+    orig_path = row["path_relative_to_root"]
+    img_filename = os.path.basename(orig_path)
+    parts = orig_path.rsplit(".", 1)
+    ext = parts[1] if len(parts) == 2 else "jpg"
+    stem = img_filename.rsplit(".", 1)[0]
+
+    if desc in EAR_DESCRIPTORS:
+        return os.path.join(root_dir, EAR_CROP_SUBDIR, f"{stem}_ear_cropped.{ext}")
+
     if "crop_path" in row.index and pd.notna(row["crop_path"]) and str(row["crop_path"]).strip():
         return str(row["crop_path"])
 
-    orig_path = row["path_relative_to_root"]
-    parts = orig_path.rsplit(".", 1)
-    img_filename = os.path.basename(orig_path)
-    ext = parts[1] if len(parts) == 2 else "jpg"
-    stem = img_filename.rsplit(".", 1)[0]
     crop_filename = f"{stem}_cropped_torso_zoomed.{ext}"
     return os.path.join(root_dir, CROP_SUBDIR, "zoomed_version", crop_filename)
 
@@ -72,6 +79,7 @@ def embed_partition(
     metadata_table: pd.DataFrame,
     embedder: GlobalEmbedder,
     root_dir: str,
+    desc: str = "",
 ) -> tuple:
     """
     Loads crops, embeds them with the given embedder.
@@ -83,15 +91,19 @@ def embed_partition(
     images = []
     valid_indices = []
 
-    for idx, row in tqdm(metadata_table.iterrows(), total=len(metadata_table), desc=f"loading crops for {embedder.backend}"):
-        crop_path = _resolve_crop_path(row, root_dir)
+    for idx, row in tqdm(metadata_table.iterrows(), total=len(metadata_table), desc=f"loading crops for {desc or embedder.backend}"):
+        crop_path = _resolve_crop_path(row, root_dir, desc=desc)
         if os.path.isfile(crop_path):
             img = cv2.imread(crop_path)
             if img is None:
                 logger.warning("cv2 could not read crop: %s", crop_path)
             images.append(img)
+        elif desc in EAR_DESCRIPTORS:
+            # No ear crop available — leave as zero embedding (no fallback for ears)
+            logger.debug("Ear crop not found for row %s; embedding will be zero.", idx)
+            images.append(None)
         else:
-            # Fall back to full original image when crop hasn't been created yet
+            # Fall back to full original image when body crop hasn't been created yet
             orig_path = os.path.normpath(os.path.join(root_dir, row["path_relative_to_root"]))
             if os.path.isfile(orig_path):
                 img = cv2.imread(orig_path)
@@ -154,9 +166,9 @@ def main(partition: str):
     metadata_filepath = os.path.join(partition_dir, f"metadata_{partition}.csv")
     metadata_table = load_metadata_file(metadata_filepath)
 
-    # Build image_id list and crop_path list up-front for parquet
+    # Build image_id list and body crop_path list up-front for parquet
     image_ids  = [_image_id_for_row(row) for _, row in metadata_table.iterrows()]
-    crop_paths = [_resolve_crop_path(row, root_dir) for _, row in metadata_table.iterrows()]
+    crop_paths = [_resolve_crop_path(row, root_dir, desc="") for _, row in metadata_table.iterrows()]
 
     # Track which faiss row each metadata row maps to (per descriptor)
     row_counters: dict[str, np.ndarray] = {}
@@ -166,7 +178,7 @@ def main(partition: str):
         t0 = time.time()
 
         embedder = GlobalEmbedder(backend=desc)
-        embeddings, _ = embed_partition(metadata_table, embedder, root_dir)
+        embeddings, _ = embed_partition(metadata_table, embedder, root_dir, desc=desc)
 
         npy_path = os.path.join(embeddings_dir, f"{partition}_{desc}.npy")
         np.save(npy_path, embeddings)

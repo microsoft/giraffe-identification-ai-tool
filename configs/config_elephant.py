@@ -32,14 +32,25 @@ GLOBAL_DESCRIPTORS = {
         "model_id":   "BVRA/MegaDescriptor-L-384",
         "dim":        1536,
         "input_size": 384,
+        "loader":     "megadescriptor",
     },
     "miewid": {
         "model_id":   "conservationxlabs/miewid-msv3",
         "dim":        2152,
         "input_size": 440,
+        "loader":     "miewid",
+    },
+    "ear_megadescriptor": {
+        "model_id":   "BVRA/MegaDescriptor-L-384",   # same weights, applied to ear crop
+        "dim":        1536,
+        "input_size": 384,
+        "loader":     "megadescriptor",
     },
 }
-ACTIVE_DESCRIPTORS = ["megadescriptor", "miewid"]   # ablation switches this
+ACTIVE_DESCRIPTORS = ["megadescriptor", "miewid", "ear_megadescriptor"]
+
+# Descriptors that embed the ear crop instead of the whole-animal crop
+EAR_DESCRIPTORS = {"ear_megadescriptor"}
 
 # ---------------------------------------------------------------------------
 # Matching / fusion
@@ -50,9 +61,10 @@ NUM_RECOMMENDED_IDS  = 3           # top-N to surface in UI
 
 # Fusion weights (must sum to 1; set equal for now, tune after ablation)
 FUSION_WEIGHTS = {
-    "megadescriptor": 0.33,
-    "miewid":         0.34,
-    "local":          0.33,
+    "megadescriptor":     0.25,
+    "miewid":             0.25,
+    "ear_megadescriptor": 0.25,
+    "local":              0.25,
 }
 
 # ---------------------------------------------------------------------------
@@ -87,6 +99,7 @@ FAISS_SUBDIR            = "faiss_index"
 LOCAL_FEATURES_SUBDIR   = "local_features"
 INDEX_PARQUET_FILENAME  = "index.parquet"      # one parquet per partition
 CROP_SUBDIR             = "processed_images"   # whole-animal crops
+EAR_CROP_SUBDIR         = "processed_images/ear_crops"  # GroundingDINO ear crops
 
 # ---------------------------------------------------------------------------
 # Sharding  (reuse from giraffe; swap ID column)

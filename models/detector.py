@@ -10,6 +10,86 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+_EAR_PROMPT = "elephant ear."   # GroundingDINO period-terminated phrase
+
+
+class EarDetector:
+    """
+    Zero-shot elephant ear detector using GroundingDINO (transformers >= 4.38).
+    Call detect_ear(whole_body_crop_bgr) → ear_crop_bgr | None.
+    """
+
+    def __init__(self, device: str = "cuda"):
+        import torch
+        self.device = torch.device(device if torch.cuda.is_available() else "cpu")
+        model_id = "IDEA-Research/grounding-dino-base"
+        try:
+            from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
+            self.processor = AutoProcessor.from_pretrained(model_id)
+            self.model = AutoModelForZeroShotObjectDetection.from_pretrained(model_id).to(self.device)
+            self.model.eval()
+            self._available = True
+            logger.info("EarDetector (GroundingDINO) loaded on %s.", self.device)
+        except Exception as exc:
+            logger.warning("EarDetector unavailable (%s). Ear crops will be skipped.", exc)
+            self._available = False
+
+    def detect_ear(
+        self,
+        image_bgr: np.ndarray,
+        conf_threshold: float = 0.25,
+        min_area_frac: float = 0.01,
+    ) -> "np.ndarray | None":
+        """
+        Returns the highest-confidence ear bounding-box crop (BGR) or None.
+        image_bgr should be the whole-animal crop from MegaDetector.
+        """
+        if not self._available:
+            return None
+
+        import torch
+        from PIL import Image
+
+        image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(image_rgb)
+        h, w = image_bgr.shape[:2]
+
+        inputs = self.processor(
+            images=pil_img, text=_EAR_PROMPT, return_tensors="pt"
+        ).to(self.device)
+
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+
+        results = self.processor.post_process_grounded_object_detection(
+            outputs,
+            inputs.input_ids,
+            threshold=conf_threshold,
+            text_threshold=0.20,
+            target_sizes=[(h, w)],
+        )
+
+        boxes = results[0]["boxes"]
+        scores = results[0]["scores"]
+        if len(boxes) == 0:
+            return None
+
+        best = int(scores.argmax())
+        x1, y1, x2, y2 = [int(v) for v in boxes[best].cpu().tolist()]
+
+        # Filter out implausibly small detections
+        area_frac = (x2 - x1) * (y2 - y1) / max(h * w, 1)
+        if area_frac < min_area_frac:
+            logger.debug("EarDetector: best box too small (%.3f); skipping.", area_frac)
+            return None
+
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+        if x2 <= x1 or y2 <= y1:
+            return None
+
+        return image_bgr[y1:y2, x1:x2].copy()
+
 
 class ElephantDetector:
     def __init__(self, backend: str = "megadetector", conf: float = 0.5, device: str = "cuda"):

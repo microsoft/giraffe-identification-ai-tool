@@ -61,6 +61,7 @@ class GlobalEmbedder:
         self.model_id = cfg["model_id"]
         self.dim = cfg["dim"]
         self.input_size = cfg["input_size"]
+        self.loader = cfg.get("loader", backend)   # which loading path to use
 
         self._model = self._load_model()
         self._model.eval()
@@ -71,7 +72,7 @@ class GlobalEmbedder:
     # ------------------------------------------------------------------
 
     def _load_model(self) -> torch.nn.Module:
-        if self.backend == "megadescriptor":
+        if self.loader == "megadescriptor":
             return self._load_megadescriptor()
         else:
             return self._load_miewid()
