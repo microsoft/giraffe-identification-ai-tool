@@ -77,24 +77,12 @@ class GlobalEmbedder:
             return self._load_miewid()
 
     def _load_megadescriptor(self) -> torch.nn.Module:
-        if _WILDLIFE_TOOLS_AVAILABLE:
-            try:
-                # wildlife_tools wraps a timm backbone and exposes .model
-                wf = _WildlifeDeepFeatures(self.model_id, device=str(self.device))
-                model = wf.model.to(self.device)
-                logger.info("megadescriptor loaded via wildlife_tools.")
-                return model
-            except Exception as exc:
-                logger.warning("wildlife_tools load failed (%s); falling back to timm.", exc)
-
         import timm
-        model = timm.create_model(
-            self.model_id,
-            pretrained=True,
-            num_classes=0,   # remove classification head → pooled features
-        )
+        # timm requires "hf_hub:" prefix for HuggingFace-hosted models
+        hf_name = f"hf_hub:{self.model_id}" if not self.model_id.startswith("hf_hub:") else self.model_id
+        model = timm.create_model(hf_name, pretrained=True, num_classes=0)
         model = model.to(self.device)
-        logger.info("megadescriptor loaded via timm.")
+        logger.info("megadescriptor loaded via timm (hf_hub).")
         return model
 
     def _load_miewid(self) -> torch.nn.Module:

@@ -38,6 +38,7 @@ def run_detection(metadata_table, metadata_filepath, input_img_dir, processed_im
 
     zoomed_dir = os.path.join(processed_img_dir, "zoomed_version")
     os.makedirs(zoomed_dir, exist_ok=True)
+    metadata_table["ai_found_torso"] = metadata_table["ai_found_torso"].astype(object)
 
     for idx, row in tqdm(metadata_table.iterrows(), total=metadata_table.shape[0]):
 
