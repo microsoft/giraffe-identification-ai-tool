@@ -117,11 +117,17 @@ class WildFusionMatcher:
     # Step 2 – Local re-rank
     # ------------------------------------------------------------------
 
-    def rerank(self, query_crop_bgr: np.ndarray, candidates: list) -> list:
+    def rerank(self, query_crop_bgr, candidates: list) -> list:
         """
         Adds 'local_inliers' and 'viz_payload' keys to each candidate dict.
         Reads crop images from disk; skips gracefully if a file is missing.
         """
+        if query_crop_bgr is None:
+            for cand in candidates:
+                cand["local_inliers"] = 0
+                cand["viz_payload"]   = {}
+            return candidates
+
         for cand in candidates:
             crop_path = cand.get("crop_path", "")
             if not crop_path or not os.path.isfile(crop_path):

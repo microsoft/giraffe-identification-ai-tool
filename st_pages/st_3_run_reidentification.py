@@ -27,7 +27,7 @@ if authorize_users() and not st.session_state.get("authenticated", False):
     login_ui()
     st.stop() 
     
-st.title('Individual Re-identification')
+st.title('Elephant Individual Re-identification')
 
 pipeline_code_dir = os.path.join(str(Path(__file__).resolve().parent.parent), str(pipeline_code_relative_dir))
 
@@ -129,7 +129,7 @@ def main_run_buttons(pipeline_code_dir, pycode_name, image_path):
 
         <div class="small-font">
         
-        **Run the matching algorithm to identify individual giraffes in the dataset:** The algorithm compares extracted feature descriptors from giraffe torso images using similarity metrics, such as Euclidean distance. By analyzing the unique coat patterns, it determines correspondences between query images and reference dataset entries, enabling accurate reidentification across different images.
+        **Run the WildFusion matching algorithm to re-identify individual elephants in the dataset:** The algorithm combines global deep descriptors (MiewID + MegaDescriptor) with local LightGlue keypoint matching. A calibrated fusion score ranks candidates from the reference catalogue, enabling accurate re-identification across different images and viewpoints.
         </div>
         """, unsafe_allow_html=True)
         

@@ -25,18 +25,18 @@ if authorize_users() and not st.session_state.get("authenticated", False):
         </style>
     """, unsafe_allow_html=True)
     login_ui()
-    st.stop() 
-    
+    st.stop()
+
 # Load styles
 st.html(f'<style>{read_file(os.path.join(parent_dir, "static/styles/header.css"))}</style>')
 st.html(f'<style>{read_file(os.path.join(parent_dir, "static/styles/markdown.css"))}</style>')
 
 # Display the header
-st.html(read_file(os.path.join(parent_dir,'static/templates/header.html')))
+st.html(read_file(os.path.join(parent_dir, 'static/templates/header.html')))
 
-# Display the image separately to ensure it loads correctly
+# Display the infographic separately to ensure it loads correctly
 st.divider()
-st.image(demo_images[10], caption="AI Workflow Visualization", use_container_width=False)
+st.image(demo_images[10], caption="Elephant Re-Identification AI Workflow — WildFusion (MiewID + MegaDescriptor + LightGlue)", use_container_width=False)
 
 # Read the contents of the README file
 script_dir = os.path.dirname(os.path.abspath(__file__))

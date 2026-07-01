@@ -85,16 +85,24 @@ def embed_partition(
 
     for idx, row in tqdm(metadata_table.iterrows(), total=len(metadata_table), desc=f"loading crops for {embedder.backend}"):
         crop_path = _resolve_crop_path(row, root_dir)
-        if not os.path.isfile(crop_path):
-            logger.warning("Crop not found: %s", crop_path)
-            images.append(None)
-        else:
+        if os.path.isfile(crop_path):
             img = cv2.imread(crop_path)
             if img is None:
-                logger.warning("cv2 could not read: %s", crop_path)
-                images.append(None)
-            else:
+                logger.warning("cv2 could not read crop: %s", crop_path)
+            images.append(img)
+        else:
+            # Fall back to full original image when crop hasn't been created yet
+            orig_path = os.path.normpath(os.path.join(root_dir, row["path_relative_to_root"]))
+            if os.path.isfile(orig_path):
+                img = cv2.imread(orig_path)
+                if img is None:
+                    logger.warning("cv2 could not read original: %s", orig_path)
+                else:
+                    logger.debug("Using full image (no crop): %s", orig_path)
                 images.append(img)
+            else:
+                logger.warning("Neither crop nor original found for row %s", idx)
+                images.append(None)
         valid_indices.append(idx)
 
     # Filter out None entries for batch embedding; track positions

@@ -27,7 +27,7 @@ if authorize_users() and not st.session_state.get("authenticated", False):
     login_ui()
     st.stop() 
     
-st.title('Identify Unknown Individual')
+st.title('Identify Unknown Elephant Individual')
 
 
 pipeline_code_dir = os.path.join(str(Path(__file__).resolve().parent.parent), str(pipeline_code_relative_dir))
@@ -130,7 +130,7 @@ def main_run_buttons(pipeline_code_dir, pycode_name, image_path):
 
         <div class="small-font">
         
-        **Cluster Unknown Giraffes:** For giraffes that were not reidentified in the previous step, we run a clustering algorithm to group them based on coat pattern similarities. This step helps identify potential new individuals by analyzing feature descriptors and grouping visually similar giraffes together. These clusters can then be reviewed for further labeling and inclusion in the reference dataset.
+        **Cluster Unknown Elephants:** For elephants that were not re-identified in the previous step, we run a clustering algorithm to group them based on embedding similarities. This step helps identify potential new individuals by analyzing WildFusion descriptors and grouping visually similar elephants together. These clusters can then be reviewed for further labeling and inclusion in the reference dataset.
         </div>
         """, unsafe_allow_html=True)
         

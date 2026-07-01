@@ -27,7 +27,7 @@ if authorize_users() and not st.session_state.get("authenticated", False):
     login_ui()
     st.stop() 
     
-st.title('Update Reference Catalogue based on Query Data')
+st.title('Update Elephant Reference Catalogue based on Query Data')
 
 pipeline_code_dir = os.path.join(str(Path(__file__).resolve().parent.parent), str(pipeline_code_relative_dir))
 
@@ -129,10 +129,10 @@ def main_run_buttons(pipeline_code_dir, pycode_name, image_path):
 
         <div class="small-font">
         
-        **Update Reference Catalogue:** All reidentified giraffes, along with newly partitioned items reviewed and approved by a human expert, are assigned identification labels. 
-        These labels are aligned with the existing labels in the reference dataset. 
-        After labeling, the reference catalog is updated accordingly. 
-        This process is repeated for each round of surveys, ensuring that the reference catalog remains accurate and up-to-date with new data and observations.
+        **Update Reference Catalogue:** All re-identified elephants, along with newly partitioned individuals reviewed and approved by a human expert, are assigned identification labels.
+        These labels are aligned with the existing labels in the reference dataset.
+        After labeling, the reference catalogue is updated accordingly.
+        This process is repeated for each survey round, ensuring the catalogue remains accurate and up-to-date with new data and observations.
         </div>
         """, unsafe_allow_html=True)
         if os.path.isfile(image_path):

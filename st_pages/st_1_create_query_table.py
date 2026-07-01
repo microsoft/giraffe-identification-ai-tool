@@ -28,7 +28,7 @@ if authorize_users() and not st.session_state.get("authenticated", False):
     login_ui()
     st.stop() 
     
-st.title("Create Query Table from Image Directory")
+st.title("Create Query Table from Elephant Image Directory")
 
 pipeline_code_dir = os.path.join(str(Path(__file__).resolve().parent.parent), str(pipeline_code_relative_dir))
 
