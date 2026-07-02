@@ -20,7 +20,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from utils.helpers_matching import (
     load_data_dirs,
     load_metadata_file,
-    make_loio_splits,
     print_memory_usage,
     log_to_file,
     restore_stdout,
@@ -89,178 +88,83 @@ def _load_crop(crop_path):
 
 
 # ---------------------------------------------------------------------------
-# LOIO calibration loop
+# All-pairs calibration scoring
 # ---------------------------------------------------------------------------
 
-def run_loio(metadata_df, emb_matrices, index_df, partition, root_dir, skip_local, session_col):
-    individuals = metadata_df[ID_COL].dropna().unique()
-    n_individuals = len(individuals)
+def run_all_pairs(metadata_df, emb_matrices, index_df):
+    """
+    Computes all pairwise cosine similarities within the reference partition.
+    Labels: 1 if the pair shares the same individual_id, 0 otherwise.
+    Also computes closed-set top-1 accuracy (excluding self-match).
 
-    if n_individuals < 2:
-        logger.error("Need at least 2 individuals for LOIO; found %d. Aborting.", n_individuals)
-        sys.exit(1)
-
-    # Build image_id → index-parquet row lookup
+    Returns desc_data and local_data in the format expected by main().
+    """
     if index_df.empty:
         logger.error("Index parquet is empty. Run step_2 for the reference partition first.")
         sys.exit(1)
 
-    img_id_to_idx_row = {}
-    for _, irow in index_df.iterrows():
-        img_id_to_idx_row[str(irow[IMAGE_ID_COL])] = irow
+    img_id_to_idx_row = {str(r[IMAGE_ID_COL]): r for _, r in index_df.iterrows()}
 
-    # Accumulators: {desc: {"scores": [], "labels": [], "fold_top1": []}}
     desc_data = {desc: {"scores": [], "labels": [], "fold_top1": []} for desc in ACTIVE_DESCRIPTORS}
     local_data = {"scores": [], "labels": [], "fold_top1": []}
 
-    local_matcher = None
-    if not skip_local:
-        try:
-            from models.local_matcher import LocalMatcher
-            local_matcher = LocalMatcher()
-        except Exception as exc:
-            logger.warning("LocalMatcher unavailable (%s). Skipping local scoring.", exc)
-            skip_local = True
+    # Build ordered lists of (individual_id, emb_row) aligned across descriptors
+    individual_ids = []
+    emb_row_map = {desc: [] for desc in ACTIVE_DESCRIPTORS}
 
-    for fold_idx, (gallery_df, probe_df) in enumerate(
-        make_loio_splits(metadata_df, ID_COL, session_col)
-    ):
-        held_out_id = probe_df[ID_COL].iloc[0]
-        logger.info("LOIO fold %d/%d — held-out: %s (%d probe, %d gallery)",
-                    fold_idx + 1, n_individuals, held_out_id, len(probe_df), len(gallery_df))
+    for _, row in metadata_df.iterrows():
+        img_id = str(row.get(IMAGE_ID_COL, "")) if IMAGE_ID_COL in row.index else ""
+        if not img_id:
+            continue
+        idx_row = img_id_to_idx_row.get(img_id)
+        if idx_row is None:
+            logger.debug("No index row for image_id='%s'; skipping.", img_id)
+            continue
+        individual_ids.append(str(row[ID_COL]))
+        for desc in ACTIVE_DESCRIPTORS:
+            col = f"{desc}_row"
+            emb_row_map[desc].append(int(idx_row[col]) if col in idx_row.index else None)
 
-        if len(gallery_df) == 0:
-            logger.warning("Empty gallery for fold %d. Skipping.", fold_idx + 1)
+    individual_ids = np.array(individual_ids)
+    n = len(individual_ids)
+    logger.info("All-pairs scoring over %d images (%d individuals).", n, len(np.unique(individual_ids)))
+
+    for desc in ACTIVE_DESCRIPTORS:
+        if emb_matrices[desc] is None:
             continue
 
-        gallery_ids = gallery_df[IMAGE_ID_COL].astype(str).tolist()
-        gallery_individual_ids = gallery_df[ID_COL].tolist()
+        rows = emb_row_map[desc]
+        valid_idx = [i for i in range(n) if rows[i] is not None]
+        if not valid_idx:
+            continue
 
-        # For each descriptor: build gallery embedding matrix for this fold
-        gallery_emb = {}
-        gallery_rows = []
-        for img_id in gallery_ids:
-            irow = img_id_to_idx_row.get(img_id)
-            if irow is None:
-                gallery_rows.append(None)
-            else:
-                gallery_rows.append(irow)
+        emb = emb_matrices[desc][[rows[i] for i in valid_idx]]  # (n_valid, D)
+        ids = individual_ids[valid_idx]
+        n_valid = len(valid_idx)
 
-        valid_gallery_mask = [r is not None for r in gallery_rows]
-        valid_gallery_individual_ids = [
-            gallery_individual_ids[i] for i in range(len(gallery_rows)) if valid_gallery_mask[i]
-        ]
-        valid_gallery_img_ids = [
-            gallery_ids[i] for i in range(len(gallery_rows)) if valid_gallery_mask[i]
-        ]
+        # Full cosine similarity matrix (embeddings are L2-normalised)
+        sim_matrix = emb @ emb.T  # (n_valid, n_valid)
 
-        for desc in ACTIVE_DESCRIPTORS:
-            if emb_matrices[desc] is None:
-                gallery_emb[desc] = None
-                continue
-            rows_for_desc = []
-            for i, irow in enumerate(gallery_rows):
-                if irow is None:
-                    continue
-                row_col = f"{desc}_row"
-                if row_col not in irow.index:
-                    continue
-                rows_for_desc.append(int(irow[row_col]))
-            if rows_for_desc:
-                gallery_emb[desc] = emb_matrices[desc][rows_for_desc]
-            else:
-                gallery_emb[desc] = None
+        scores, labels, top1_correct = [], [], []
+        for i in range(n_valid):
+            for j in range(i + 1, n_valid):
+                scores.append(float(sim_matrix[i, j]))
+                labels.append(1 if ids[i] == ids[j] else 0)
 
-        # Per-probe scoring
-        fold_desc_scores = {desc: {"scores": [], "labels": []} for desc in ACTIVE_DESCRIPTORS}
-        fold_local = {"scores": [], "labels": []}
-        fold_top1_correct = []
+            # Closed-set top-1 (exclude self)
+            row_sims = sim_matrix[i].copy()
+            row_sims[i] = -np.inf
+            top1_correct.append(1 if ids[int(np.argmax(row_sims))] == ids[i] else 0)
 
-        for _, probe_row in probe_df.iterrows():
-            probe_img_id = str(probe_row[IMAGE_ID_COL]) if IMAGE_ID_COL in probe_row.index else ""
-            probe_individual_id = probe_row[ID_COL]
+        desc_data[desc]["scores"] = scores
+        desc_data[desc]["labels"] = labels
+        desc_data[desc]["fold_top1"] = top1_correct
 
-            probe_idx_row = img_id_to_idx_row.get(probe_img_id)
-            if probe_idx_row is None:
-                logger.warning("No index parquet row for probe image_id='%s'. Skipping.", probe_img_id)
-                continue
-
-            # Gather cosine scores per descriptor
-            per_desc_top_scores = {}
-            per_desc_top_indices = {}
-
-            for desc in ACTIVE_DESCRIPTORS:
-                if emb_matrices[desc] is None or gallery_emb[desc] is None:
-                    continue
-                row_col = f"{desc}_row"
-                if row_col not in probe_idx_row.index:
-                    logger.warning("Column %s missing in index parquet for probe %s.", row_col, probe_img_id)
-                    continue
-                probe_emb_row = int(probe_idx_row[row_col])
-                probe_vec = emb_matrices[desc][probe_emb_row]
-
-                k = min(SHORTLIST_K, len(valid_gallery_individual_ids))
-                sims, top_idxs = cosine_topk(probe_vec, gallery_emb[desc], k)
-
-                per_desc_top_scores[desc] = sims
-                per_desc_top_indices[desc] = top_idxs
-
-                top_individual_ids = [valid_gallery_individual_ids[i] for i in top_idxs]
-                is_same = np.array([gid == probe_individual_id for gid in top_individual_ids], dtype=np.float32)
-
-                fold_desc_scores[desc]["scores"].extend(sims.tolist())
-                fold_desc_scores[desc]["labels"].extend(is_same.tolist())
-
-            # Top-1 accuracy (use first available descriptor as reference ranking)
-            ref_desc = next((d for d in ACTIVE_DESCRIPTORS if d in per_desc_top_indices), None)
-            if ref_desc is not None:
-                top1_individual = valid_gallery_individual_ids[per_desc_top_indices[ref_desc][0]]
-                fold_top1_correct.append(int(top1_individual == probe_individual_id))
-
-            # Local matching on shortlisted candidates (first descriptor's ranking)
-            if not skip_local and local_matcher is not None and ref_desc is not None:
-                probe_crop_path = (
-                    str(probe_idx_row["crop_path"])
-                    if "crop_path" in probe_idx_row.index and pd.notna(probe_idx_row["crop_path"])
-                    else ""
-                )
-                probe_crop = _load_crop(probe_crop_path)
-                if probe_crop is None:
-                    logger.debug("Probe crop not found for '%s'. Skipping local.", probe_img_id)
-                else:
-                    top_idxs_ref = per_desc_top_indices[ref_desc]
-                    for rank_pos, gal_i in enumerate(top_idxs_ref):
-                        gal_img_id = valid_gallery_img_ids[gal_i]
-                        gal_idx_row = img_id_to_idx_row.get(gal_img_id)
-                        if gal_idx_row is None:
-                            continue
-                        gal_crop_path = (
-                            str(gal_idx_row["crop_path"])
-                            if "crop_path" in gal_idx_row.index and pd.notna(gal_idx_row["crop_path"])
-                            else ""
-                        )
-                        gal_crop = _load_crop(gal_crop_path)
-                        if gal_crop is None:
-                            continue
-                        try:
-                            n_inliers, _ = local_matcher.score(probe_crop, gal_crop)
-                        except Exception as exc:
-                            logger.debug("Local matcher error: %s", exc)
-                            n_inliers = 0
-                        gal_individual_id = valid_gallery_individual_ids[gal_i]
-                        is_same_local = int(gal_individual_id == probe_individual_id)
-                        fold_local["scores"].append(float(n_inliers))
-                        fold_local["labels"].append(is_same_local)
-
-        # Accumulate fold data
-        for desc in ACTIVE_DESCRIPTORS:
-            desc_data[desc]["scores"].extend(fold_desc_scores[desc]["scores"])
-            desc_data[desc]["labels"].extend(fold_desc_scores[desc]["labels"])
-        if fold_local["scores"]:
-            local_data["scores"].extend(fold_local["scores"])
-            local_data["labels"].extend(fold_local["labels"])
-        if fold_top1_correct:
-            desc_data[ACTIVE_DESCRIPTORS[0]]["fold_top1"].append(np.mean(fold_top1_correct))
+        n_pos = int(sum(labels))
+        n_neg = len(labels) - n_pos
+        top1_acc = float(np.mean(top1_correct))
+        logger.info("[%s] %d pos pairs, %d neg pairs | closed-set top-1: %.3f",
+                    desc, n_pos, n_neg, top1_acc)
 
     return desc_data, local_data
 
@@ -346,13 +250,10 @@ def main():
             lambda p: os.path.splitext(os.path.basename(p))[0]
         )
 
-    # Run LOIO loop
-    desc_data, local_data = run_loio(
-        metadata_df, emb_matrices, index_df, partition, root_dir,
-        args.skip_local, args.session_col,
-    )
+    # Run all-pairs scoring for calibration
+    desc_data, local_data = run_all_pairs(metadata_df, emb_matrices, index_df)
 
-    # Top-1 accuracy report across folds
+    # Top-1 accuracy report (closed-set, per image)
     all_top1 = desc_data[ACTIVE_DESCRIPTORS[0]]["fold_top1"]
     if all_top1:
         top1_mean = float(np.mean(all_top1))
@@ -360,7 +261,7 @@ def main():
     else:
         top1_mean = float("nan")
         top1_std = float("nan")
-    print(f"\nLOIO top-1 accuracy: mean={top1_mean:.4f}  std={top1_std:.4f}  (over {len(all_top1)} folds)")
+    print(f"\nClosed-set top-1 accuracy: mean={top1_mean:.4f}  std={top1_std:.4f}  (over {len(all_top1)} images)")
 
     # Fit and save calibrators
     calib_dir = os.path.join(root_dir, CALIBRATION_DIR)

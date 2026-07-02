@@ -49,10 +49,11 @@ class WildFusionMatcher:
         embedders: dict,          # {desc_name: GlobalEmbedder}
         faiss_indexes: dict,      # {desc_name: faiss.Index}
         ref_meta: dict,           # {desc_name: list[(individual_id, image_id, crop_path, viewpoint)]}
-        local_matcher: LocalMatcher,
+        local_matcher,            # LocalMatcher | None
         calibrators: dict,        # {matcher_name: Calibrator}; may be empty pre-Phase-4
         weights: dict = None,
         shortlist_k: int = SHORTLIST_K,
+        skip_local: bool = False,
     ):
         self.embedders     = embedders
         self.faiss_indexes = faiss_indexes
@@ -61,6 +62,7 @@ class WildFusionMatcher:
         self.calibrators   = calibrators if calibrators else {}
         self.weights       = weights if weights is not None else dict(FUSION_WEIGHTS)
         self.shortlist_k   = shortlist_k
+        self.skip_local    = skip_local
 
         if not self.calibrators:
             logger.warning(
@@ -175,9 +177,11 @@ class WildFusionMatcher:
             fused        += w * cal_sim
             total_weight += w
 
-        # Local matcher contribution
+        # Local matcher contribution — only enter denominator when local actually fired.
+        # With zero inliers and no local calibrator there is no signal, so including
+        # the local weight in total_weight would unfairly dilute the global scores.
         w_local = self.weights.get("local", 0.0)
-        if w_local > 0.0:
+        if w_local > 0.0 and (local_inliers > 0 or "local" in self.calibrators):
             # Normalise inlier count to [0, 1] using a soft sigmoid-like mapping.
             # 50 inliers → ~0.77; this keeps the score bounded without a hard cap.
             local_raw = float(local_inliers) / (float(local_inliers) + 20.0)

@@ -56,7 +56,7 @@ EAR_DESCRIPTORS = {"ear_megadescriptor"}
 # Matching / fusion
 # ---------------------------------------------------------------------------
 SHORTLIST_K          = 50          # FAISS candidates passed to local re-ranker
-MATCH_ACCEPT_THRESHOLD = 0.65      # fused calibrated score → "matched"
+MATCH_ACCEPT_THRESHOLD = 0.70      # fused calibrated score → "matched"
 NUM_RECOMMENDED_IDS  = 3           # top-N to surface in UI
 
 # Fusion weights (must sum to 1; set equal for now, tune after ablation)

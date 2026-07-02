@@ -4,6 +4,8 @@
 # --------------------------------------------------------------------------
 
 import logging
+import os
+import sys
 
 import cv2
 import numpy as np
@@ -101,8 +103,22 @@ class ElephantDetector:
 
         if backend == "megadetector":
             try:
-                from PytorchWildlife.models import detection as pw_detection
-                self._model = pw_detection.MegaDetectorV5(device=device, pretrained=True)
+                # PytorchWildlife imports 'models.yolo' internally, which collides
+                # with our project's models/ package.  Temporarily hide both our
+                # sys.path entry and the cached sys.modules['models'] so that
+                # PytorchWildlife resolves its own internal modules correctly.
+                _proj_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+                _removed = [p for p in sys.path if os.path.normcase(os.path.abspath(p)) == os.path.normcase(_proj_root)]
+                for p in _removed:
+                    sys.path.remove(p)
+                _saved_models = sys.modules.pop("models", None)
+                try:
+                    from PytorchWildlife.models import detection as pw_detection
+                    self._model = pw_detection.MegaDetectorV5(device=device, pretrained=True)
+                finally:
+                    if _saved_models is not None:
+                        sys.modules["models"] = _saved_models
+                    sys.path.extend(_removed)
                 self.backend = "megadetector"
                 logger.info("MegaDetector v5 loaded on %s.", device)
             except Exception as exc:
@@ -118,29 +134,35 @@ class ElephantDetector:
             return image_bgr, "unknown"
 
         try:
-            # MegaDetector expects RGB
-            image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-            results = self._model.single_image_detection(image_rgb, conf_thres=self.conf)
+            # MegaDetector expects RGB; cap the long edge to 1280px for inference
+            h, w = image_bgr.shape[:2]
+            scale = min(1.0, 1280.0 / max(h, w))
+            if scale < 1.0:
+                infer_bgr = cv2.resize(image_bgr, (int(w * scale), int(h * scale)))
+            else:
+                infer_bgr = image_bgr
+            image_rgb = cv2.cvtColor(infer_bgr, cv2.COLOR_BGR2RGB)
+            results = self._model.single_image_detection(image_rgb, det_conf_thres=self.conf)
             detections = results.get("detections", None)
 
             if detections is None or len(detections.xyxy) == 0:
                 return None, "unknown"
 
-            # Pick the highest-confidence animal detection (category 1 in MD v5)
+            # Pick the highest-confidence animal detection (class 0 in MD v5)
             best_idx = None
             best_conf = -1.0
             for i, (conf_val, cls_id) in enumerate(
                 zip(detections.confidence.tolist(), detections.class_id.tolist())
             ):
-                # MD v5 class 1 = animal
-                if int(cls_id) == 1 and float(conf_val) >= self.conf and float(conf_val) > best_conf:
+                if int(cls_id) == 0 and float(conf_val) >= self.conf and float(conf_val) > best_conf:
                     best_conf = float(conf_val)
                     best_idx = i
 
             if best_idx is None:
                 return None, "unknown"
 
-            x1, y1, x2, y2 = [int(v) for v in detections.xyxy[best_idx]]
+            # Scale bbox back to original image dimensions
+            x1, y1, x2, y2 = [int(v / scale) for v in detections.xyxy[best_idx]]
             viewpoint = self._infer_viewpoint((x1, y1, x2, y2), image_bgr.shape)
             crop = self._square_pad_crop(image_bgr, x1, y1, x2, y2)
             return crop, viewpoint

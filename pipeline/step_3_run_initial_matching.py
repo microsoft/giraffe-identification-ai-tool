@@ -8,6 +8,7 @@ import sys
 import pickle
 import pstats
 import cProfile
+import argparse
 import logging
 import numpy as np
 import pandas as pd
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 # WildFusionMatcher factory
 # ---------------------------------------------------------------------------
 
-def build_wildfusion(root_dir: str) -> WildFusionMatcher:
+def build_wildfusion(root_dir: str, skip_local: bool = False) -> WildFusionMatcher:
     reference_dir = os.path.join(root_dir, "reference_dir")
     faiss_dir     = os.path.join(reference_dir, FAISS_SUBDIR)
     calib_dir     = os.path.join(root_dir, CALIBRATION_DIR)
@@ -68,8 +69,8 @@ def build_wildfusion(root_dir: str) -> WildFusionMatcher:
         with open(meta_path, "rb") as fh:
             ref_meta[desc] = pickle.load(fh)
 
-    # Local matcher
-    local_matcher = LocalMatcher(
+    # Local matcher (skip loading when --skip-local to avoid CPU bottleneck)
+    local_matcher = None if skip_local else LocalMatcher(
         backend=LOCAL_MATCHER_BACKEND,
         max_keypoints=LOCAL_MATCHER_KEYPOINTS,
         min_inliers=LOCAL_MATCHER_MIN_INLIERS,
@@ -93,6 +94,7 @@ def build_wildfusion(root_dir: str) -> WildFusionMatcher:
         ref_meta=ref_meta,
         local_matcher=local_matcher,
         calibrators=calibrators,
+        skip_local=skip_local,
     )
 
 
@@ -162,6 +164,7 @@ def sweep_over_query_images(
     embeddings_per_desc: dict,
     query_index_df: pd.DataFrame,
     wildfusion: WildFusionMatcher,
+    skip_local: bool = False,
 ) -> pd.DataFrame:
     query_metadata = add_columns_for_matching_results(query_metadata)
 
@@ -215,10 +218,12 @@ def sweep_over_query_images(
             from configs.config_elephant import CROP_SUBDIR
             crop_path = os.path.join(root_dir, CROP_SUBDIR, "zoomed_version", f"{stem}_cropped_torso_zoomed.{ext}")
 
-        query_crop_bgr = cv2.imread(crop_path) if os.path.isfile(crop_path) else None
-
-        if query_crop_bgr is None:
-            logger.debug("Query crop not found for '%s'. Local matching will be skipped.", query_image_path)
+        if skip_local:
+            query_crop_bgr = None
+        else:
+            query_crop_bgr = cv2.imread(crop_path) if os.path.isfile(crop_path) else None
+            if query_crop_bgr is None:
+                logger.debug("Query crop not found for '%s'. Local matching will be skipped.", query_image_path)
 
         query_metadata.loc[idx, "matching_attempt"] = "success"
 
@@ -233,6 +238,15 @@ def sweep_over_query_images(
 # ---------------------------------------------------------------------------
 
 def main():
+    parser = argparse.ArgumentParser(description="Run WildFusion matching (step 3)")
+    parser.add_argument(
+        "--skip-local",
+        action="store_true",
+        default=False,
+        dest="skip_local",
+        help="Skip LightGlue local re-ranking (fast, CPU-safe mode)",
+    )
+    args = parser.parse_args()
 
     profiler = cProfile.Profile()
     profiler.enable()
@@ -263,7 +277,7 @@ def main():
     query_index_df = pd.read_parquet(query_index_parquet)
 
     # Build WildFusionMatcher (loads FAISS indexes, calibrators, local matcher)
-    wildfusion = build_wildfusion(root_dir)
+    wildfusion = build_wildfusion(root_dir, skip_local=args.skip_local)
 
     # Run matching
     query_metadata = sweep_over_query_images(
@@ -272,6 +286,7 @@ def main():
         embeddings_per_desc,
         query_index_df,
         wildfusion,
+        skip_local=args.skip_local,
     )
     query_metadata.to_csv(metadata_query_filepath, index=False)
     logger.info("Matching complete. Results saved to %s", metadata_query_filepath)
