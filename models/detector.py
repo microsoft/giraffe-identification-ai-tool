@@ -41,6 +41,7 @@ class EarDetector:
         image_bgr: np.ndarray,
         conf_threshold: float = 0.25,
         min_area_frac: float = 0.01,
+        max_area_frac: float = 0.50,
     ) -> "np.ndarray | None":
         """
         Returns the highest-confidence ear bounding-box crop (BGR) or None.
@@ -76,14 +77,26 @@ class EarDetector:
         if len(boxes) == 0:
             return None
 
-        best = int(scores.argmax())
-        x1, y1, x2, y2 = [int(v) for v in boxes[best].cpu().tolist()]
+        # Discard boxes that cover the majority of the image — GroundingDINO
+        # sometimes fires a high-scoring box over the whole animal rather than
+        # just the ear. Pick the best box within the plausible ear-size range.
+        best = None
+        best_score = -1.0
+        for i, (box, score) in enumerate(zip(boxes.cpu().tolist(), scores.cpu().tolist())):
+            bx1, by1, bx2, by2 = box
+            area_frac = (bx2 - bx1) * (by2 - by1) / max(h * w, 1)
+            if area_frac < min_area_frac or area_frac > max_area_frac:
+                continue
+            if float(score) > best_score:
+                best_score = float(score)
+                best = i
 
-        # Filter out implausibly small detections
-        area_frac = (x2 - x1) * (y2 - y1) / max(h * w, 1)
-        if area_frac < min_area_frac:
-            logger.debug("EarDetector: best box too small (%.3f); skipping.", area_frac)
+        if best is None:
+            logger.debug("EarDetector: no box in plausible area range [%.2f, %.2f].",
+                         min_area_frac, max_area_frac)
             return None
+
+        x1, y1, x2, y2 = [int(v) for v in boxes[best].cpu().tolist()]
 
         x1, y1 = max(0, x1), max(0, y1)
         x2, y2 = min(w, x2), min(h, y2)

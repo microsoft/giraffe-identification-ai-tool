@@ -11,6 +11,7 @@ import cProfile
 import argparse
 import logging
 import time
+import cv2
 import numpy as np
 import pandas as pd
 import faiss
@@ -72,6 +73,26 @@ def _image_id_for_row(row: pd.Series) -> str:
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Preprocessing
+# ---------------------------------------------------------------------------
+
+def _apply_clahe(bgr: np.ndarray) -> np.ndarray:
+    """Enhance local contrast via CLAHE on the L channel (LAB space)."""
+    lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+    lab_enhanced = cv2.merge([clahe.apply(l), a, b])
+    return cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2BGR)
+
+
+def _normalize_viewpoint(bgr: np.ndarray, viewpoint: str) -> np.ndarray:
+    """Flip right-facing body crops to left-facing (canonical orientation)."""
+    if viewpoint == "right":
+        return cv2.flip(bgr, 1)
+    return bgr
+
+
 # Per-descriptor embedding
 # ---------------------------------------------------------------------------
 
@@ -86,10 +107,9 @@ def embed_partition(
     Returns (embeddings np.ndarray (n, D), valid_indices list-of-int)
     where valid_indices corresponds to rows in metadata_table that had a readable crop.
     """
-    import cv2
-
     images = []
     valid_indices = []
+    is_ear = desc in EAR_DESCRIPTORS
 
     for idx, row in tqdm(metadata_table.iterrows(), total=len(metadata_table), desc=f"loading crops for {desc or embedder.backend}"):
         crop_path = _resolve_crop_path(row, root_dir, desc=desc)
@@ -97,8 +117,14 @@ def embed_partition(
             img = cv2.imread(crop_path)
             if img is None:
                 logger.warning("cv2 could not read crop: %s", crop_path)
+            else:
+                if is_ear:
+                    img = _apply_clahe(img)
+                else:
+                    viewpoint = str(row.get(VIEWPOINT_COL, "")) if VIEWPOINT_COL in row.index else ""
+                    img = _normalize_viewpoint(img, viewpoint)
             images.append(img)
-        elif desc in EAR_DESCRIPTORS:
+        elif is_ear:
             # No ear crop available — leave as zero embedding (no fallback for ears)
             logger.debug("Ear crop not found for row %s; embedding will be zero.", idx)
             images.append(None)
@@ -110,6 +136,8 @@ def embed_partition(
                 if img is None:
                     logger.warning("cv2 could not read original: %s", orig_path)
                 else:
+                    viewpoint = str(row.get(VIEWPOINT_COL, "")) if VIEWPOINT_COL in row.index else ""
+                    img = _normalize_viewpoint(img, viewpoint)
                     logger.debug("Using full image (no crop): %s", orig_path)
                 images.append(img)
             else:
