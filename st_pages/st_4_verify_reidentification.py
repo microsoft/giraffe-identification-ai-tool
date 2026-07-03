@@ -100,6 +100,12 @@ def initialize_vizualization_project():
         metadata_filepath = os.path.join(st.session_state.root_dir, partition + '_dir', 'metadata_' + partition + '.csv')
         st.session_state.metadata[partition] = load_metadata_file(metadata_filepath)
 
+    # Auto-load on first visit so images are visible immediately
+    if 'matching_results_table' not in st.session_state:
+        st.session_state.metadata_table = st.session_state.metadata['reference'].copy()
+        st.session_state.matching_results_table = st.session_state.metadata['query'].copy()
+        reset_state_vars()
+
     st.markdown(f'<div class="radio-font-size">Load Project:</div>', unsafe_allow_html=True)
     st.text(
         "How do you want to proceed? "
@@ -145,7 +151,8 @@ def display_left_query_images_matched_images(image_paths, captions):
     for i in [1, 0]:
         image_path = image_paths[i]
         if not os.path.isfile(image_path):
-            raise FileNotFoundError(f"Image file '{image_path}' not found.")
+            col.warning(f"Image not found: {os.path.basename(image_path)}")
+            continue
         img = ImageOps.exif_transpose(Image.open(image_path))
         if i == 0:
             scale_factor = 0.15
@@ -160,18 +167,15 @@ def display_left_query_images_matched_images(image_paths, captions):
 def display_left_query_images_not_matched_images(image_paths, captions):
     cols = st.columns(1)[0]
     for i in [1, 0]:
+        image_path = image_paths[i]
+        if not os.path.isfile(image_path):
+            cols.warning(f"Image not found: {os.path.basename(image_path)}")
+            continue
+        img = ImageOps.exif_transpose(Image.open(image_path))
         if i == 1:
-            image_path = image_paths[i]
-            if not os.path.isfile(image_path):
-                raise FileNotFoundError("Image file '{}' not found.".format(image_path))
-            img = ImageOps.exif_transpose(Image.open(image_path))
             img_resized = img.resize((256, 256))
             cols.image(img_resized, caption='Cropped Elephant Image', use_container_width=True)
         elif i == 0:
-            image_path = image_paths[i]
-            if not os.path.isfile(image_path):
-                raise FileNotFoundError("Image file '{}' not found.".format(image_path))
-            img = ImageOps.exif_transpose(Image.open(image_path))
             img_resized = img.resize((int(img.width * 0.15), int(img.height * 0.15)))
             cols.image(img_resized, caption=captions[i], use_container_width=False)
 
@@ -185,14 +189,16 @@ def display_right_reference_image(data, starting_idx, num_rows, num_cols):
                 image_path = image_paths[index]
 
                 torso_img_path = get_corresponding_torso_image(image_path, "zoomed_version", "_zoomed")
-                if not os.path.isfile(torso_img_path):
-                    raise FileNotFoundError("Image file '{}' not found.".format(torso_img_path))
-                torso_img = ImageOps.exif_transpose(Image.open(torso_img_path))
-                torso_img = torso_img.resize((256, 256))
-                col.image(torso_img, caption="Cropped Elephant Image", use_container_width=True)
+                if os.path.isfile(torso_img_path):
+                    torso_img = ImageOps.exif_transpose(Image.open(torso_img_path))
+                    torso_img = torso_img.resize((256, 256))
+                    col.image(torso_img, caption="Cropped Elephant Image", use_container_width=True)
+                else:
+                    col.warning("Crop not available")
 
                 if not os.path.isfile(image_path):
-                    raise FileNotFoundError("Image file '{}' not found.".format(image_path))
+                    col.warning(f"Image not found: {os.path.basename(image_path)}")
+                    continue
                 actual_img = ImageOps.exif_transpose(Image.open(image_path))
                 actual_img_resized = actual_img.resize((int(actual_img.width * 0.15), int(actual_img.height * 0.15)))
                 actual_image_caption = os.path.basename(image_path)
@@ -352,7 +358,7 @@ def display_custom_table(assigned_id, image_serial_matched, fused_sim, global_si
         {vp_row_cand}
     </table>
     """
-    st.markdown(table_html, unsafe_allow_html=True)
+    st.html(table_html)
 
 def display_custom_table_human_input(key_query):
     value = get_human_input_single(key_query)
@@ -413,7 +419,7 @@ def display_custom_table_ground_truth(ground_truth):
         </tr>
     </table>
     """
-    st.markdown(table_html, unsafe_allow_html=True)
+    st.html(table_html)
 
 def update_human_inputs_all(query_image_paths, human_input_value):
     df = st.session_state.matching_results_table

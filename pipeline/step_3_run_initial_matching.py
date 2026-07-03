@@ -5,6 +5,7 @@
 
 import os
 import sys
+import json
 import pickle
 import pstats
 import cProfile
@@ -102,6 +103,20 @@ def build_wildfusion(root_dir: str, skip_local: bool = False) -> WildFusionMatch
 # Metadata column management
 # ---------------------------------------------------------------------------
 
+def _viz_payload_to_json(viz_payload: dict) -> str:
+    """Serialize viz_payload (numpy arrays) to a JSON string for CSV storage."""
+    if not viz_payload:
+        return ""
+    try:
+        serializable = {
+            k: v.tolist() if isinstance(v, np.ndarray) else v
+            for k, v in viz_payload.items()
+        }
+        return json.dumps(serializable)
+    except Exception:
+        return ""
+
+
 def add_columns_for_matching_results(query_metadata: pd.DataFrame) -> pd.DataFrame:
     cols = ["matching_attempt", "matching_status"]
     for i in range(1, NUM_RECOMMENDED_IDS + 1):
@@ -112,10 +127,11 @@ def add_columns_for_matching_results(query_metadata: pd.DataFrame) -> pd.DataFra
             f"match_global_sim_{i}",
             f"match_local_count_{i}",
             f"match_fused_sim_{i}",
+            f"viz_payload_{i}",
         ]
     str_cols = {"matching_attempt", "matching_status"}
     for i in range(1, NUM_RECOMMENDED_IDS + 1):
-        str_cols |= {f"match_individual_{i}", f"match_image_{i}", f"match_viewpoint_{i}"}
+        str_cols |= {f"match_individual_{i}", f"match_image_{i}", f"match_viewpoint_{i}", f"viz_payload_{i}"}
 
     for col in cols:
         if col not in query_metadata.columns:
@@ -150,6 +166,7 @@ def fill_matching_results(
         query_metadata.loc[matching_index, f"match_global_sim_{i}"] = global_sim_val
         query_metadata.loc[matching_index, f"match_local_count_{i}"] = rec.local_inliers
         query_metadata.loc[matching_index, f"match_fused_sim_{i}"]  = rec.fused_sim
+        query_metadata.loc[matching_index, f"viz_payload_{i}"]      = _viz_payload_to_json(rec.viz_payload)
 
     return query_metadata
 

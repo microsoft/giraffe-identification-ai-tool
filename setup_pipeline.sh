@@ -41,9 +41,9 @@ tmux new -d -s "$SESSION_NAME"
 
 # Construct the command to run in tmux with logging
 if [ -n "$SCRIPT_ARG" ]; then
-  CMD="conda activate giraffe && python -u $SCRIPT_NAME $SCRIPT_ARG 2>&1 | tee $LOG_FILE && conda deactivate"
+  CMD="conda activate ai4gl-base && python -u $SCRIPT_NAME $SCRIPT_ARG 2>&1 | tee $LOG_FILE && conda deactivate"
 else
-  CMD="conda activate giraffe && python -u $SCRIPT_NAME 2>&1 | tee $LOG_FILE && conda deactivate"
+  CMD="conda activate ai4gl-base && python -u $SCRIPT_NAME 2>&1 | tee $LOG_FILE && conda deactivate"
 fi
 
 # Display the command to be executed

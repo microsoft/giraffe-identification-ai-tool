@@ -69,6 +69,13 @@ class LocalMatcher:
     # ------------------------------------------------------------------
 
     def _init_lightglue(self):
+        # cuDNN drops CC 7.0 support in newer builds; fall back to generic CUDA ops.
+        if self.device.type == "cuda":
+            cc = torch.cuda.get_device_capability(self.device)
+            if cc < (7, 5):
+                torch.backends.cudnn.enabled = False
+                logger.info("Disabled cuDNN (CC %d.%d < 7.5); using generic CUDA ops.", *cc)
+
         if _LIGHTGLUE_NATIVE:
             self._extractor = SuperPoint(max_num_keypoints=self.max_keypoints).eval().to(self.device)
             self._matcher   = LightGlue(features="superpoint").eval().to(self.device)

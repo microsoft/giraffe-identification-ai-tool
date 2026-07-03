@@ -41,7 +41,7 @@ demo_images_files = {
     1: 'infographic/all_images.png',
     2: 'infographic/header_elephant.png',
     3: 'infographic/ms-ai-for-good-lab.png',
-    4: 're_id.png',
+    4: 'infographic/re_id.png',
     5: 'infographic/identify_unknowns.png',
     6: 'infographic/update_catalogue.jpg',
     7: 'infographic/GiraffesLakeshore1.jpg',
