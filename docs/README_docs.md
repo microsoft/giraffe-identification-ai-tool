@@ -42,7 +42,7 @@
     - [New columns | partitioning unknown items](#new-columns--partitioning-unknown-items)
     - [New columns | evaluating accuracy metrics if ground truth available](#new-columns--evaluating-accuracy-metrics-if-ground-truth-available)
     - [New columns | expert review and refinement of AI results](#new-columns--expert-review-and-refinement-of-ai-results)
-    - [New columns | updating reference catalog with processd query images](#new-columns--updating-reference-catalog-with-processd-query-images)
+    - [New columns | updating reference catalog with processed query images](#new-columns--updating-reference-catalog-with-processed-query-images)
   - [**User Authentication**](#user-authentication)
 
 ## **Software Dependencies**
@@ -125,7 +125,7 @@ code_directory/
 - **`/environment.yaml`**  
   Create a new conda environment.
 
-- **`/requirement.txt`**  
+- **`/requirements.txt`**  
   Required libraries and framework to run the codes.
 
 - **`/setup_pipeline.sh`**  
@@ -179,7 +179,7 @@ code_directory/
   A utility module with functions needed to do the matching step, such as a giraffe class to apply vision models, train, read, write faiss index for search, run union-find algorithm for partitioning used throughout the pipeline.
 
 - **`/utils/utils_sharding.py`**  
-  A utility module with functions needed to do distributed indexing and merging retrived results to help with robustness in accuracy. 
+  A utility module with functions needed to do distributed indexing and merging retrieved results to help with robustness in accuracy. 
 
 - **`/utils/utils_vision.py`**  
   A utility module with helper functions, such as file input data processing for training object detection model used throughout the pipeline.
@@ -477,7 +477,7 @@ The `metadata_query.csv` file contains various columns that track the different 
 These columns record the human intervention stage. By setting `auto_accept_model_matching_results` equal to True in `code_directory/configs/config_matching.py`, you can accept all the model outputs automatically.
 - **human_input**: Indicates whether the human reviewer has accepted or rejected the AI results.
 
-### New columns | updating reference catalog with processd query images
+### New columns | updating reference catalog with processed query images
 - **final_update_status**: Indicates the update status of the reference database.
 - **reference_pkl_file**: The updated reference `.pkl` file used for future matching.
 - **metadata_reference.csv**: The updated `metadata_reference.csv` file, which includes new matching results and updates to existing entries.
