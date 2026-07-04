@@ -114,19 +114,38 @@ def main():
     st.html(f'<style>{read_file(os.path.join(os.path.dirname(__file__), "static/styles/sidebar.css"))}</style>')
     st.html(f'<style>{read_file(os.path.join(os.path.dirname(__file__), "static/styles/fonts.css"))}</style>')
 
-    # Build the app
-    app = st.navigation([
-        st.Page("st_pages/st_0_home.py", title="Home"),
+    # Initialize mode
+    if "mode" not in st.session_state:
+        st.session_state.mode = "field"
+
+    # Sidebar mode toggle — appears above navigation links
+    with st.sidebar:
+        mode_choice = st.radio(
+            "View",
+            ["Field Review", "Advanced"],
+            index=0 if st.session_state.mode == "field" else 1,
+            horizontal=True,
+            key="_global_mode",
+            label_visibility="collapsed",
+        )
+        new_mode = "field" if mode_choice == "Field Review" else "advanced"
+        if new_mode != st.session_state.mode:
+            st.session_state.mode = new_mode
+            st.rerun()
+
+    core_pages = [
+        st.Page("st_pages/st_0_home.py", title="Dashboard"),
+        st.Page("st_pages/st_review_matches.py", title="Review Matches"),
+        st.Page("st_pages/st_review_unknowns.py", title="Review Unknowns"),
+        st.Page("st_pages/st_pipeline.py", title="Run Analysis"),
+    ]
+    advanced_pages = core_pages + [
+        st.Page("st_pages/st_advanced_tools.py", title="Advanced Tools"),
         st.Page("st_pages/st_1_create_query_table.py", title="Create Query Table"),
-        st.Page("st_pages/st_2_preprocess_images.py", title="Preprocess Images"),
-        st.Page("st_pages/st_3_run_reidentification.py", title="Run Reidentification"),
-        st.Page("st_pages/st_4_verify_reidentification.py", title="Verify Reidentification"),
-        st.Page("st_pages/st_5_identify_unknown_individuals.py", title="Identify Unknown"),
-        st.Page("st_pages/st_6_verify_new_identifications.py", title="Verify New IDs"),
-        st.Page("st_pages/st_7_update_catalogue.py", title="Update Catalogue"),
-        st.Page("st_pages/st_8_validate_based_on_ground_truth.py", title="Validate Ground Truth"),
-        st.Page("st_pages/st_9_visualize_single_image.py", title="Visualize Image")
-    ])
+    ]
+
+    pages = advanced_pages if st.session_state.mode == "advanced" else core_pages
+    app = st.navigation(pages)
     app.run()
         
 
