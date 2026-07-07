@@ -46,11 +46,17 @@ GLOBAL_DESCRIPTORS = {
         "input_size": 384,
         "loader":     "megadescriptor",
     },
+    "ear_miewid": {
+        "model_id":   "conservationxlabs/miewid-msv3",   # same weights as miewid, applied to ear crop
+        "dim":        2152,
+        "input_size": 440,
+        "loader":     "miewid",
+    },
 }
-ACTIVE_DESCRIPTORS = ["megadescriptor", "miewid", "ear_megadescriptor"]
+ACTIVE_DESCRIPTORS = ["megadescriptor", "miewid", "ear_megadescriptor", "ear_miewid"]
 
 # Descriptors that embed the ear crop instead of the whole-animal crop
-EAR_DESCRIPTORS = {"ear_megadescriptor"}
+EAR_DESCRIPTORS = {"ear_megadescriptor", "ear_miewid"}
 
 # ---------------------------------------------------------------------------
 # Matching / fusion
@@ -61,10 +67,11 @@ NUM_RECOMMENDED_IDS  = 3           # top-N to surface in UI
 
 # Fusion weights (must sum to 1; set equal for now, tune after ablation)
 FUSION_WEIGHTS = {
-    "megadescriptor":     0.25,
-    "miewid":             0.25,
-    "ear_megadescriptor": 0.25,
-    "local":              0.25,
+    "megadescriptor":     0.20,
+    "miewid":             0.20,
+    "ear_megadescriptor": 0.20,
+    "ear_miewid":         0.20,
+    "local":              0.20,
 }
 
 # ---------------------------------------------------------------------------
