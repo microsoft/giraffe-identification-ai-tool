@@ -282,7 +282,7 @@ def try_render_keypoint_overlay(current_query_image, recom_rank):
             return
 
         ref_img_path = os.path.join(st.session_state.root_dir, ref_row.iloc[0]['path_relative_to_root'])
-        query_crop = get_corresponding_torso_image(current_query_image)
+        query_crop = get_corresponding_torso_image(current_query_image, "zoomed_version", "_zoomed")
 
         if not os.path.isfile(query_crop) or not os.path.isfile(ref_img_path):
             st.caption("Keypoint overlay: crop files not found on disk.")

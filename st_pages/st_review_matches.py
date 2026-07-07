@@ -95,22 +95,44 @@ def _get_torso_path(image_path, subdir="original_size", suffix=""):
     ).replace(f".{ext}", f"_cropped_torso{suffix}.{ext}")
 
 
+def _get_ear_crop_path(image_path):
+    """Ear crop path — same convention as step_1 / step_2: {stem}_ear_cropped.{ext}."""
+    parts = image_path.rsplit(".", 1)
+    ext = parts[-1] if len(parts) > 1 else "jpg"
+    stem = os.path.basename(image_path).rsplit(".", 1)[0]
+    return os.path.join(st.session_state.processed_img_dir, "ear_crops", f"{stem}_ear_cropped.{ext}")
+
+
 def _build_queue():
-    """Return (queue_paths, n_matched) where queue = matched + not_matched."""
+    """Return (queue_paths, n_matched) where queue = matched + not_matched.
+
+    Result is cached in session state so the ordering is stable across reruns.
+    Call _invalidate_queue() to force a rebuild (e.g. after accepting a below-threshold image).
+    """
+    if "rm_queue_cache" in st.session_state:
+        return st.session_state.rm_queue_cache
+
     df = st.session_state.matching_results_table
     root = st.session_state.root_dir
-
     sort_col = "match_local_count_1" if "match_local_count_1" in df.columns else None
 
     matched_df = df[df["matching_status"] == "matched"].copy()
     if sort_col:
-        matched_df = matched_df.sort_values(sort_col, ascending=False)
+        # kind="stable" keeps equal-inlier-count images in their original CSV order
+        matched_df = matched_df.sort_values(sort_col, ascending=False, kind="stable")
 
     nm_df = df[df["matching_status"] == "not_matched"].copy()
 
     matched_paths = [os.path.join(root, p) for p in matched_df["path_relative_to_root"]]
     nm_paths = [os.path.join(root, p) for p in nm_df["path_relative_to_root"]]
-    return matched_paths + nm_paths, len(matched_paths)
+    result = matched_paths + nm_paths, len(matched_paths)
+    st.session_state.rm_queue_cache = result
+    return result
+
+
+def _invalidate_queue():
+    """Force queue rebuild on next render (call after matching_status changes)."""
+    st.session_state.pop("rm_queue_cache", None)
 
 
 def _get_matched_label(image_path, rank):
@@ -232,7 +254,7 @@ def _render_keypoint_overlay(image_path, rank):
             return
 
         ref_path = os.path.join(st.session_state.root_dir, ref_row.iloc[0]["path_relative_to_root"])
-        q_crop = _get_torso_path(image_path)
+        q_crop = _get_torso_path(image_path, "zoomed_version", "_zoomed")
 
         if not os.path.isfile(q_crop) or not os.path.isfile(ref_path):
             st.caption("Keypoint overlay: crop files not on disk.")
@@ -273,21 +295,33 @@ def _render_keypoint_overlay(image_path, rank):
 # Image loading helper
 # ---------------------------------------------------------------------------
 
-def _load_display_image(path, size=300):
-    """Try zoomed torso → plain torso → full image. Returns PIL image or None."""
-    zoomed = _get_torso_path(path, "zoomed_version", "_zoomed")
-    plain = _get_torso_path(path)
-    for candidate in [zoomed, plain]:
+@st.cache_data(max_entries=600, show_spinner=False)
+def _load_image_bytes(path: str, size: int) -> bytes | None:
+    """Load, resize, and return JPEG bytes. Cached so disk is only hit once per path."""
+    for candidate in [path]:
+        if not os.path.isfile(candidate):
+            continue
+        try:
+            img = ImageOps.exif_transpose(Image.open(candidate)).convert("RGB")
+            w, h = img.size
+            if h > 0:
+                scale = size / max(w, h)
+                img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            return buf.getvalue()
+        except Exception:
+            return None
+    return None
+
+
+def _load_display_image(image_path: str, size: int = 300) -> bytes | None:
+    """Try zoomed torso → plain torso → full image. Returns JPEG bytes or None."""
+    zoomed = _get_torso_path(image_path, "zoomed_version", "_zoomed")
+    plain = _get_torso_path(image_path)
+    for candidate in [zoomed, plain, image_path]:
         if os.path.isfile(candidate):
-            img = ImageOps.exif_transpose(Image.open(candidate))
-            return img.resize((size, size))
-    if os.path.isfile(path):
-        img = ImageOps.exif_transpose(Image.open(path))
-        w, h = img.size
-        if h > 0:
-            new_h = size
-            new_w = int((new_h / h) * w)
-            return img.resize((new_w, new_h))
+            return _load_image_bytes(candidate, size)
     return None
 
 
@@ -314,7 +348,13 @@ def main():
         return
 
     n_total = len(queue)
-    reviewed = sum(1 for p in queue if _get_human_input(p) is not None)
+    # Vectorized count — much faster than per-row lookups
+    df = st.session_state.matching_results_table
+    queue_mask = df["matching_status"].isin(["matched", "not_matched"])
+    if "human_input" in df.columns:
+        reviewed = int(df.loc[queue_mask, "human_input"].notna().sum())
+    else:
+        reviewed = 0
 
     # --- Header bar ---
     h1, h2, h3 = st.columns([5, 2, 1])
@@ -344,11 +384,13 @@ def main():
             st.session_state.rm_queue_idx = max(0, idx - 100)
             st.session_state.rm_ref_idx = 0
             st.session_state.rm_rank = 1
+            st.rerun()
     with nc2:
         if st.button("◀ Prev"):
             st.session_state.rm_queue_idx = max(0, idx - 1)
             st.session_state.rm_ref_idx = 0
             st.session_state.rm_rank = 1
+            st.rerun()
     with nc3:
         queue_type = "matched" if idx < n_matched else "not-matched"
         st.markdown(f"<div style='text-align:center;padding-top:8px'>{idx + 1} / {n_total} &nbsp;·&nbsp; <em>{queue_type}</em></div>", unsafe_allow_html=True)
@@ -357,11 +399,13 @@ def main():
             st.session_state.rm_queue_idx = min(n_total - 1, idx + 1)
             st.session_state.rm_ref_idx = 0
             st.session_state.rm_rank = 1
+            st.rerun()
     with nc5:
         if st.button("+100 ▶▶"):
             st.session_state.rm_queue_idx = min(n_total - 1, idx + 100)
             st.session_state.rm_ref_idx = 0
             st.session_state.rm_rank = 1
+            st.rerun()
 
     idx = st.session_state.rm_queue_idx
     current = queue[idx]
@@ -447,6 +491,36 @@ def main():
     with st.expander("Keypoint Overlay", expanded=False):
         _render_keypoint_overlay(current, rank)
 
+    with st.expander("Ear Crops", expanded=False):
+        ec1, ec2 = st.columns(2)
+        q_ear = _get_ear_crop_path(current)
+        with ec1:
+            st.caption("Query ear")
+            q_ear_bytes = _load_image_bytes(q_ear, 220) if os.path.isfile(q_ear) else None
+            if q_ear_bytes:
+                st.image(q_ear_bytes, use_container_width=False)
+            else:
+                st.caption("Not available")
+        with ec2:
+            st.caption(f"Reference ear — {ind or 'N/A'}")
+            ref_ear_shown = False
+            if img_id is not None:
+                ref_df = st.session_state.get("metadata_table")
+                if ref_df is not None:
+                    ref_row = ref_df[ref_df["image_id"] == img_id]
+                    if not ref_row.empty:
+                        ref_full = os.path.join(
+                            st.session_state.root_dir,
+                            ref_row.iloc[0]["path_relative_to_root"],
+                        )
+                        r_ear = _get_ear_crop_path(ref_full)
+                        r_ear_bytes = _load_image_bytes(r_ear, 220) if os.path.isfile(r_ear) else None
+                        if r_ear_bytes:
+                            st.image(r_ear_bytes, use_container_width=False)
+                            ref_ear_shown = True
+            if not ref_ear_shown:
+                st.caption("Not available")
+
     with st.expander("Evidence", expanded=is_advanced):
         ev1, ev2 = st.columns(2)
         with ev1:
@@ -476,6 +550,7 @@ def main():
             _set_human_input(current, "AcceptId")
             if is_not_matched:
                 _overwrite_matching_status(current)
+                _invalidate_queue()  # image moves from not-matched → matched section
             _advance(queue)
             st.rerun()
     with ac2:

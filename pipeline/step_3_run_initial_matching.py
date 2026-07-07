@@ -126,9 +126,12 @@ def add_columns_for_matching_results(query_metadata: pd.DataFrame) -> pd.DataFra
             f"match_viewpoint_{i}",
             f"match_global_sim_{i}",
             f"match_local_count_{i}",
+            f"match_local_sim_{i}",
             f"match_fused_sim_{i}",
             f"viz_payload_{i}",
         ]
+        for desc in ACTIVE_DESCRIPTORS:
+            cols.append(f"match_{desc}_sim_{i}")
     str_cols = {"matching_attempt", "matching_status"}
     for i in range(1, NUM_RECOMMENDED_IDS + 1):
         str_cols |= {f"match_individual_{i}", f"match_image_{i}", f"match_viewpoint_{i}", f"viz_payload_{i}"}
@@ -161,12 +164,14 @@ def fill_matching_results(
         query_metadata.loc[matching_index, f"match_individual_{i}"] = rec.individual_id
         query_metadata.loc[matching_index, f"match_image_{i}"]      = rec.image_id
         query_metadata.loc[matching_index, f"match_viewpoint_{i}"]  = rec.viewpoint
-        # Store mean of global sims as the representative global similarity for UI display
         global_sim_val = float(np.mean(list(rec.global_sims.values()))) if rec.global_sims else 0.0
         query_metadata.loc[matching_index, f"match_global_sim_{i}"] = global_sim_val
+        for desc in ACTIVE_DESCRIPTORS:
+            query_metadata.loc[matching_index, f"match_{desc}_sim_{i}"] = rec.global_sims.get(desc, np.nan)
         query_metadata.loc[matching_index, f"match_local_count_{i}"] = rec.local_inliers
-        query_metadata.loc[matching_index, f"match_fused_sim_{i}"]  = rec.fused_sim
-        query_metadata.loc[matching_index, f"viz_payload_{i}"]      = _viz_payload_to_json(rec.viz_payload)
+        query_metadata.loc[matching_index, f"match_local_sim_{i}"]   = rec.local_sim
+        query_metadata.loc[matching_index, f"match_fused_sim_{i}"]   = rec.fused_sim
+        query_metadata.loc[matching_index, f"viz_payload_{i}"]       = _viz_payload_to_json(rec.viz_payload)
 
     return query_metadata
 

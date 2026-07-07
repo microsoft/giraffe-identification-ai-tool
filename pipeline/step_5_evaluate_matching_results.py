@@ -9,12 +9,13 @@ import logging
 import pstats
 import cProfile
 import warnings
+import itertools
 import numpy as np
 import pandas as pd
 from sklearn.metrics.cluster import adjusted_rand_score
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from configs.config_elephant import GT_COL, ID_COL, VIEWPOINT_COL, MATCH_ACCEPT_THRESHOLD
+from configs.config_elephant import GT_COL, ID_COL, VIEWPOINT_COL, MATCH_ACCEPT_THRESHOLD, ACTIVE_DESCRIPTORS
 from utils.helpers_matching import print_memory_usage, log_to_file, restore_stdout
 from utils.helpers_matching import load_data_dirs, load_metadata_file
 from utils.helpers_matching import save_merged_accuracy_results
@@ -220,6 +221,92 @@ def evaluate_by_viewpoint(query_metadata, gt_col, pred_col, viewpoint_col, match
     return result
 
 
+def compute_per_model_ablation(query_metadata, gt_col, active_descriptors, k=3, output_path=None):
+    """
+    Re-ranks the stored top-k candidates under every single-model and combination config,
+    then computes top-1, top-3, and mAP@k for each.
+
+    NOTE: re-ranking is limited to the k candidates already stored. Candidates that fell
+    outside the top-k under full fusion are not recoverable here, so these numbers are a
+    lower bound on what each model could achieve with a full shortlist.
+    """
+    all_signals = list(active_descriptors) + ["local"]
+
+    df = query_metadata[query_metadata[gt_col].notna()].copy()
+    if df.empty:
+        logger.warning("No rows with ground-truth labels — skipping per-model ablation.")
+        return pd.DataFrame()
+
+    results = []
+    for r in range(1, len(all_signals) + 1):
+        for combo in itertools.combinations(all_signals, r):
+            config_name = "+".join(combo)
+
+            reranked = []  # list of dicts: {gt, rank1_id, rank2_id, ...}
+            for _, row in df.iterrows():
+                gt_val = row.get(gt_col)
+
+                # Build (score, individual_id) for each stored rank slot
+                slots = []
+                for i in range(1, k + 1):
+                    ind = row.get(f"match_individual_{i}")
+                    if pd.isna(ind):
+                        continue
+                    scores = []
+                    for m in combo:
+                        col = f"match_{m}_sim_{i}"
+                        v = row.get(col, np.nan)
+                        if not pd.isna(v):
+                            scores.append(float(v))
+                    score = float(np.mean(scores)) if scores else 0.0
+                    slots.append((score, str(ind)))
+
+                slots.sort(key=lambda x: x[0], reverse=True)
+
+                entry = {gt_col: gt_val}
+                for new_rank, (_, ind) in enumerate(slots, start=1):
+                    entry[f"match_individual_{new_rank}"] = ind
+                reranked.append(entry)
+
+            temp = pd.DataFrame(reranked)
+            pred_cols = [f"match_individual_{i}" for i in range(1, k + 1)]
+            top1 = compute_topk_accuracy(temp, gt_col, pred_cols, k=1)
+            top3 = compute_topk_accuracy(temp, gt_col, pred_cols, k=k)
+
+            aps = []
+            for _, row in temp.iterrows():
+                gt_val = row.get(gt_col)
+                if pd.isna(gt_val):
+                    continue
+                num_hits, ap = 0, 0.0
+                for rank_idx in range(1, k + 1):
+                    pred = row.get(f"match_individual_{rank_idx}")
+                    if pred == gt_val:
+                        num_hits += 1
+                        ap += num_hits / rank_idx
+                aps.append(ap)
+            map_k = float(np.mean(aps)) if aps else np.nan
+
+            results.append({
+                "config":    config_name,
+                "n_signals": len(combo),
+                "top1":      round(top1, 4) if not np.isnan(top1) else np.nan,
+                f"top{k}":   round(top3, 4) if not np.isnan(top3) else np.nan,
+                f"mAP@{k}":  round(map_k, 4) if not np.isnan(map_k) else np.nan,
+            })
+
+    results_df = pd.DataFrame(results).sort_values("top1", ascending=False).reset_index(drop=True)
+
+    print(f"\n--- Per-Model Ablation (re-ranked within stored top-{k}) ---")
+    print(results_df.to_string(index=False))
+
+    if output_path:
+        results_df.to_csv(output_path, index=False)
+        print(f"Per-model ablation saved to {output_path}")
+
+    return results_df
+
+
 def ablation_summary(results_per_config, output_path):
     """
     Writes a comparison CSV with one row per config (e.g. global_only,
@@ -344,6 +431,18 @@ def main():
         cross_top1 = vp_result['cross_view']['top1']
         if not (isinstance(cross_top1, float) and np.isnan(cross_top1)) and cross_top1 < 0.70:
             print("WARNING: Cross-view top-1 accuracy is below 0.70 — review viewpoint handling.")
+
+    # -----------------------------------------------------------------------
+    # Per-model ablation: each signal individually + all combinations
+    # -----------------------------------------------------------------------
+    if GT_COL in query_metadata.columns:
+        ablation_df = compute_per_model_ablation(
+            query_metadata,
+            gt_col=GT_COL,
+            active_descriptors=ACTIVE_DESCRIPTORS,
+            k=3,
+            output_path=os.path.join(root_dir, 'query_dir', 'ablation_per_model.csv'),
+        )
 
     # Save all metrics to a single results CSV
     if all_metrics:
