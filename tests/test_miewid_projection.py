@@ -55,6 +55,7 @@ from models.miewid_projection import (
     retrieval_map_top1,
     supervised_contrastive_loss,
 )
+from pipeline.elephant_splits import _fingerprint_df
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +91,13 @@ def _make_splits_df(
                     "individual_id": individual_id,
                     "session_id": session_id,
                     "split": split,
+                    "split_protocol": (
+                        "unseen_identity"
+                        if split.startswith("held_out")
+                        else "temporal"
+                    ),
+                    "evaluable": True,
+                    "fold": 0 if split.startswith("held_out") else 1,
                 })
 
     for ind_id in gallery_ids:
@@ -127,7 +135,7 @@ def _make_ref_mapping(splits_df: pd.DataFrame, in_dim: int = 16) -> pd.DataFrame
             "crop_path": f"/fake/{row['image_id']}.jpg",
             "schema_version": "v1",
             "source_fingerprint": "abc123",
-            "split_fingerprint": "def456",
+            "split_fingerprint": _fingerprint_df(splits_df),
             "model_preprocess_fingerprint": "ear_miewid:config-elephant-v1",
         })
     return pd.DataFrame(mapping_rows)

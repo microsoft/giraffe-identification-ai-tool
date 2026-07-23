@@ -51,6 +51,52 @@ Pilot artifacts:
 - `$ELPEPHANTS_VERSION_ROOT/pilot/report/bteh_pilot_crop_report.json`
 - `$ELPEPHANTS_VERSION_ROOT/pilot/report/contact_sheets/`
 
+Full extraction and frozen descriptor baselines:
+
+- 2,058 eligible images processed; 2,055 body crops and 2,242 ear crops accepted.
+- Reference partition: 1,668 images; query partition: 390 images.
+- Raw temporal top-1: MegaDescriptor 1.58%, MiewID 5.38%,
+  ear-MegaDescriptor 2.88%, ear-MiewID 14.06%.
+- Raw held-out onboarding top-1: MegaDescriptor 1.35%, MiewID 2.70%,
+  ear-MegaDescriptor 1.37%, ear-MiewID 9.59%.
+
+Ear-MiewID is the strongest frozen baseline, but absolute retrieval quality is
+not yet production-ready. Platt calibration is rejected because all four
+hard-negative OOF fits have negative slopes, which would reverse similarity
+rankings.
+
+The split-safe ear-MiewID projection adapter improved inner validation mAP by
+10.44 points and inner top-1 by 7.28 points, but failed the untouched external
+gate: temporal top-1 fell from 14.06% to 12.46%, and held-out top-1 fell from
+9.59% to 4.11%. The adapter is rejected and stored under
+`experiments/rejected_ear_miewid_projection/`; it must not enter calibration or
+production. Raw ear-MiewID remains the selected ELPephants baseline.
+
+The archive's original train/validation split gives ear-MiewID 29.01% top-1,
+showing a large same-era/session advantage over the leakage-safe temporal
+protocol. Pre-specified raw fusion did not help: equal body+ear MiewID reached
+10.13% temporal top-1, and equal four-channel fusion reached 6.96%.
+
+**Current decision:** keep raw ear-MiewID as the research baseline; do not build
+an ELPephants production matcher or auto-accept threshold. Calibration must be
+revisited only after retrieval improves.
+
+Reproduce the rejected experiment only under its isolated namespace:
+
+```bash
+python -m pipeline.train_miewid_projection \
+  --artifact-root "$ELPEPHANTS_VERSION_ROOT" \
+  --splits-file "$ELPEPHANTS_VERSION_ROOT/splits/elpephants_splits.parquet" \
+  --out-dir "$ELPEPHANTS_VERSION_ROOT/experiments/rejected_ear_miewid_projection/checkpoint" \
+  --descriptor ear_miewid \
+  --out-dim 2152 \
+  --hidden-dim 0 \
+  --loss triplet \
+  --epochs 40 \
+  --seed 42 \
+  --device cuda
+```
+
 ## Run the crop-quality pilot
 
 ```bash

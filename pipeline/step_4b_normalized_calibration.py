@@ -287,6 +287,7 @@ def run_normalized_calibration(
     grid_step: float = 0.05,
     hard_neg_k: int = 5,
     calibration_method: str = "auto",
+    weight_search_device: str = "auto",
 ) -> dict:
     """
     Full OOF calibration pipeline.
@@ -402,6 +403,7 @@ def run_normalized_calibration(
         oof_identity_results,
         all_channels=channels,
         grid_step=grid_step,
+        device=weight_search_device,
     )
 
     weights_path = out_dir / "fusion_weights.json"
@@ -556,6 +558,12 @@ def _parse_args():
         default="auto",
         help="Per-channel calibration method (default: auto).",
     )
+    parser.add_argument(
+        "--weight-search-device",
+        choices=["auto", "cpu", "cuda"],
+        default="auto",
+        help="Device for vectorized fusion-weight search (default: auto).",
+    )
     return parser.parse_args()
 
 
@@ -591,6 +599,7 @@ def main():
             grid_step=args.grid_step,
             hard_neg_k=args.hard_neg_k,
             calibration_method=args.calibration_method,
+            weight_search_device=args.weight_search_device,
         )
     except CalibrationSupportError as exc:
         logger.error("Calibration support error (hard fail): %s", exc)

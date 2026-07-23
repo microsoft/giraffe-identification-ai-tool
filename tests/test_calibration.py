@@ -73,6 +73,13 @@ def test_explicit_platt_with_high_support():
     assert transformed[0] < transformed[1]
 
 
+def test_platt_rejects_anti_monotonic_fit():
+    scores = np.linspace(0.1, 0.9, 200)
+    labels = np.concatenate([np.ones(100), np.zeros(100)])
+    with pytest.raises(ValueError, match="slope is non-positive"):
+        Calibrator().fit(scores, labels, method="platt")
+
+
 def test_calibrator_save_load_roundtrip(tmp_path):
     rng = np.random.default_rng(seed=42)
     n_pos = MIN_POSITIVE_PAIRS_FOR_ISOTONIC + 10

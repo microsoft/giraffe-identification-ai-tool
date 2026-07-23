@@ -145,6 +145,16 @@ class Calibrator:
             # solver='lbfgs' converges reliably on 1-D feature with intercept.
             self._platt = LogisticRegression(C=1e6, solver="lbfgs", max_iter=1000)
             self._platt.fit(scores.reshape(-1, 1), is_same)
+            slope = float(self._platt.coef_[0, 0])
+            if slope < 0:
+                self._platt = None
+                self._method = None
+                raise ValueError(
+                    "Calibrator.fit: Platt slope is non-positive "
+                    f"({slope:.6f}); higher similarity would reduce match "
+                    "probability and reverse retrieval rankings. The selected "
+                    "OOF pair distribution does not support monotonic calibration."
+                )
 
         return self
 

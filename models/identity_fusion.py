@@ -618,6 +618,8 @@ def fit_fusion_weights(
     oof_results: List[QueryResult],
     all_channels: List[str],
     grid_step: float = 0.05,
+    device: str = "cpu",
+    query_batch_size: int = 64,
 ) -> Tuple[Dict[str, float], Dict]:
     """
     Deterministic constrained grid search over the weight simplex
@@ -645,15 +647,6 @@ def fit_fusion_weights(
     if not oof_results:
         raise ValueError("fit_fusion_weights: no OOF results provided.")
 
-    n_steps = int(round(1.0 / grid_step))
-
-    # Generate all weight combinations summing to 1 over the simplex.
-    # For efficiency, parameterise with n_ch-1 free variables.
-    best_map = -1.0
-    best_top1 = -1.0
-    best_w = {ch: 1.0 / n_ch for ch in all_channels}
-    candidate_count = 0
-
     def _grid_weight_gen(n: int, remaining: float, step: float):
         """Generate all non-negative integer multiples of step summing <= remaining."""
         if n == 1:
@@ -666,21 +659,248 @@ def fit_fusion_weights(
                 yield (w_k,) + rest
             k += 1
 
-    for w_tuple in _grid_weight_gen(n_ch, 1.0, grid_step):
-        if abs(sum(w_tuple) - 1.0) > 1e-6:
-            continue
-        weights = {ch: float(w) for ch, w in zip(all_channels, w_tuple)}
-        candidate_count += 1
-        ranked = _apply_weights_and_rank(oof_results, weights, all_channels)
-        map_score = compute_map(ranked)
-        top1_score = compute_top1(ranked)
+    weight_tuples = [
+        values
+        for values in _grid_weight_gen(n_ch, 1.0, grid_step)
+        if abs(sum(values) - 1.0) <= 1e-6
+    ]
+    weight_array = np.asarray(weight_tuples, dtype=np.float64)
+    candidate_count = len(weight_tuples)
 
+    if query_batch_size <= 0:
+        raise ValueError("fit_fusion_weights: query_batch_size must be positive.")
+
+    selected_device = device
+    torch = None
+    if device in {"auto", "cuda"}:
+        try:
+            import torch as _torch
+        except ImportError:
+            if device == "cuda":
+                raise RuntimeError(
+                    "fit_fusion_weights: CUDA requested but PyTorch is unavailable."
+                )
+        else:
+            torch = _torch
+        if device == "auto":
+            selected_device = (
+                "cuda" if torch is not None and torch.cuda.is_available() else "cpu"
+            )
+        elif torch is None or not torch.cuda.is_available():
+            raise RuntimeError(
+                "fit_fusion_weights: CUDA requested but no CUDA device is available."
+            )
+    elif device != "cpu":
+        raise ValueError(
+            "fit_fusion_weights: device must be 'cpu', 'cuda', or 'auto'."
+        )
+
+    # Group compatible queries so score tensors can be evaluated in batches.
+    # Each identity appears once, so AP is reciprocal rank of the truth identity.
+    groups: Dict[Tuple[Tuple[bool, ...], int], List[Tuple[np.ndarray, int]]] = {}
+    n_queries = 0
+    for result in oof_results:
+        if result.query_individual_id is None:
+            continue
+        n_queries += 1
+        present_mask = tuple(ch in result.channels_present for ch in all_channels)
+        if not any(present_mask):
+            raise ValueError(
+                "fit_fusion_weights: a scored query has no available channels."
+            )
+        identities = [
+            candidate.individual_id for candidate in result.ranked_identities
+        ]
+        try:
+            truth_index = identities.index(result.query_individual_id)
+        except ValueError:
+            truth_index = -1
+        scores = np.asarray(
+            [
+                [
+                    candidate.channel_calibrated.get(channel, 0.0)
+                    for channel in all_channels
+                ]
+                for candidate in result.ranked_identities
+            ],
+            dtype=np.float64,
+        )
+        groups.setdefault((present_mask, len(identities)), []).append(
+            (scores, truth_index)
+        )
+
+    if n_queries == 0:
+        raise ValueError(
+            "fit_fusion_weights: no queries with known identities provided."
+        )
+
+    if selected_device == "cuda":
+        assert torch is not None
+        backend_device = torch.device("cuda")
+        weights_backend = torch.as_tensor(
+            weight_array,
+            dtype=torch.float64,
+            device=backend_device,
+        )
+        map_sums = torch.zeros(
+            candidate_count,
+            dtype=torch.float64,
+            device=backend_device,
+        )
+        top1_sums = torch.zeros_like(map_sums)
+    else:
+        weights_backend = weight_array
+        map_sums = np.zeros(candidate_count, dtype=np.float64)
+        top1_sums = np.zeros(candidate_count, dtype=np.float64)
+
+    for (present_mask, n_identities), query_rows in groups.items():
+        mask_array = np.asarray(present_mask, dtype=np.float64)
+        if selected_device == "cuda":
+            mask = torch.as_tensor(
+                mask_array,
+                dtype=torch.float64,
+                device=backend_device,
+            )
+            masked_weights = weights_backend * mask
+            denominators = masked_weights.sum(dim=1, keepdim=True)
+            fallback = mask / mask.sum()
+            normalized_weights = torch.where(
+                denominators > 0,
+                masked_weights / denominators.clamp_min(
+                    torch.finfo(torch.float64).eps
+                ),
+                fallback.expand_as(masked_weights),
+            )
+        else:
+            masked_weights = weights_backend * mask_array
+            denominators = masked_weights.sum(axis=1, keepdims=True)
+            fallback = mask_array / mask_array.sum()
+            normalized_weights = np.divide(
+                masked_weights,
+                denominators,
+                out=np.broadcast_to(
+                    fallback,
+                    masked_weights.shape,
+                ).copy(),
+                where=denominators > 0,
+            )
+
+        for start in range(0, len(query_rows), query_batch_size):
+            batch = query_rows[start : start + query_batch_size]
+            score_batch = np.stack([row[0] for row in batch], axis=0)
+            truth_indexes = np.asarray([row[1] for row in batch], dtype=np.int64)
+            valid_truth = truth_indexes >= 0
+            if not valid_truth.any():
+                continue
+            safe_truth = np.maximum(truth_indexes, 0)
+
+            if selected_device == "cuda":
+                scores_tensor = torch.as_tensor(
+                    score_batch,
+                    dtype=torch.float64,
+                    device=backend_device,
+                )
+                truth_tensor = torch.as_tensor(
+                    safe_truth,
+                    dtype=torch.long,
+                    device=backend_device,
+                )
+                valid_tensor = torch.as_tensor(
+                    valid_truth,
+                    dtype=torch.bool,
+                    device=backend_device,
+                )
+                fused = torch.zeros(
+                    (
+                        len(batch),
+                        candidate_count,
+                        n_identities,
+                    ),
+                    dtype=torch.float64,
+                    device=backend_device,
+                )
+                for channel_index in range(n_ch):
+                    fused = fused + (
+                        normalized_weights[:, channel_index][None, :, None]
+                        * scores_tensor[:, :, channel_index][:, None, :]
+                    )
+                truth_scores = fused.gather(
+                    2,
+                    truth_tensor[:, None, None].expand(
+                        -1,
+                        candidate_count,
+                        1,
+                    ),
+                ).squeeze(2)
+                positions = torch.arange(
+                    n_identities,
+                    device=backend_device,
+                )[None, None, :]
+                ranks = 1 + (
+                    (fused > truth_scores[:, :, None])
+                    | (
+                        (fused == truth_scores[:, :, None])
+                        & (positions < truth_tensor[:, None, None])
+                    )
+                ).sum(dim=2)
+                valid_ranks = ranks[valid_tensor]
+                map_sums += (1.0 / valid_ranks).sum(dim=0)
+                top1_sums += (valid_ranks == 1).sum(dim=0)
+            else:
+                fused = np.zeros(
+                    (
+                        len(batch),
+                        candidate_count,
+                        n_identities,
+                    ),
+                    dtype=np.float64,
+                )
+                for channel_index in range(n_ch):
+                    fused = fused + (
+                        normalized_weights[:, channel_index][None, :, None]
+                        * score_batch[:, :, channel_index][:, None, :]
+                    )
+                truth_scores = np.take_along_axis(
+                    fused,
+                    safe_truth[:, None, None],
+                    axis=2,
+                ).squeeze(2)
+                positions = np.arange(n_identities)[None, None, :]
+                ranks = 1 + (
+                    (fused > truth_scores[:, :, None])
+                    | (
+                        (fused == truth_scores[:, :, None])
+                        & (positions < safe_truth[:, None, None])
+                    )
+                ).sum(axis=2)
+                valid_ranks = ranks[valid_truth]
+                map_sums += (1.0 / valid_ranks).sum(axis=0)
+                top1_sums += (valid_ranks == 1).sum(axis=0)
+
+    if selected_device == "cuda":
+        map_scores = (map_sums / n_queries).cpu().numpy()
+        top1_scores = (top1_sums / n_queries).cpu().numpy()
+    else:
+        map_scores = map_sums / n_queries
+        top1_scores = top1_sums / n_queries
+
+    best_index = 0
+    best_map = -1.0
+    best_top1 = -1.0
+    for index, (map_score, top1_score) in enumerate(
+        zip(map_scores, top1_scores)
+    ):
         if map_score > best_map or (
             abs(map_score - best_map) < 1e-8 and top1_score > best_top1
         ):
-            best_map = map_score
-            best_top1 = top1_score
-            best_w = weights
+            best_index = index
+            best_map = float(map_score)
+            best_top1 = float(top1_score)
+
+    best_w = {
+        channel: float(weight_array[best_index, index])
+        for index, channel in enumerate(all_channels)
+    }
 
     logger.info(
         "fit_fusion_weights: %d candidates evaluated; best mAP=%.4f top1=%.4f weights=%s",
@@ -693,6 +913,7 @@ def fit_fusion_weights(
     diagnostics = {
         "grid_step": grid_step,
         "n_candidates_evaluated": candidate_count,
+        "device": selected_device,
         "best_map": round(best_map, 6),
         "best_top1": round(best_top1, 6),
         "best_weights": {ch: round(v, 6) for ch, v in best_w.items()},

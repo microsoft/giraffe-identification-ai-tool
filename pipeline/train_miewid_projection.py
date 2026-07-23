@@ -87,6 +87,7 @@ from models.miewid_projection import (
     retrieval_map_top1,
     supervised_contrastive_loss,
 )
+from pipeline.elephant_splits import _fingerprint_df
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -119,9 +120,14 @@ def _load_ear_miewid_artifacts(
     return matrix, mapping
 
 
-def _load_splits(artifact_root: Path) -> pd.DataFrame:
-    """Load the BTEH splits parquet."""
-    splits_path = artifact_root / SPLITS_SUBDIR / SPLITS_FILENAME
+def _load_splits(
+    artifact_root: Path,
+    splits_path: Optional[Path] = None,
+) -> pd.DataFrame:
+    """Load canonical elephant splits, preserving the BTEH default."""
+    splits_path = splits_path or (
+        artifact_root / SPLITS_SUBDIR / SPLITS_FILENAME
+    )
     if not splits_path.is_file():
         raise FileNotFoundError(f"Splits parquet not found: {splits_path}")
     splits_df = pd.read_parquet(str(splits_path))
@@ -265,6 +271,7 @@ def train_projection(
     early_stop_patience: int = 10,
     device_str: Optional[str] = None,
     partition: str = "reference",
+    splits_path: Optional[Path] = None,
 ) -> Dict:
     """
     Train a projection head and return a full experiment manifest.
@@ -289,7 +296,7 @@ def train_projection(
     # 1. Load artifacts
     # ------------------------------------------------------------------
     matrix, mapping = _load_ear_miewid_artifacts(artifact_root, partition, descriptor)
-    splits_df = _load_splits(artifact_root)
+    splits_df = _load_splits(artifact_root, splits_path=splits_path)
 
     in_dim = matrix.shape[1]
     logger.info("Input embedding dimension: %d, out_dim: %d", in_dim, out_dim)
@@ -305,7 +312,13 @@ def train_projection(
 
     # Collect fingerprints for manifest
     source_fp = str(mapping["source_fingerprint"].iloc[0]) if "source_fingerprint" in mapping.columns else "unknown"
-    split_fp = str(mapping["split_fingerprint"].iloc[0]) if "split_fingerprint" in mapping.columns else "unknown"
+    mapping_split_fp = str(mapping["split_fingerprint"].iloc[0]) if "split_fingerprint" in mapping.columns else "unknown"
+    split_fp = _fingerprint_df(splits_df)
+    if mapping_split_fp != split_fp:
+        raise ValueError(
+            "Projection split fingerprint mismatch: descriptor mapping has "
+            f"{mapping_split_fp!r}, supplied splits resolve to {split_fp!r}."
+        )
     model_fp = str(mapping["model_preprocess_fingerprint"].iloc[0]) if "model_preprocess_fingerprint" in mapping.columns else "unknown"
 
     # ------------------------------------------------------------------
@@ -593,12 +606,14 @@ def train_projection(
         "best_val_top1": round(best_val_top1, 6),
         "gate": {
             "adopted": gate_result.adopted,
+            "scope": "inner_session_disjoint_validation_only",
             "reason": gate_result.reason,
             "map_delta": round(gate_result.map_delta, 6),
             "top1_delta": round(gate_result.top1_delta, 6),
             "min_map_delta": min_map_delta,
             "min_top1_delta": min_top1_delta,
             "instability_threshold": instability_threshold,
+            "requires_untouched_query_confirmation": True,
         },
         "safety": {
             "forbidden_image_ids_checked": True,
@@ -665,6 +680,12 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Output directory for checkpoint and manifests.",
     )
+    p.add_argument(
+        "--splits-file",
+        type=Path,
+        default=None,
+        help="Canonical splits parquet (default: BTEH-compatible artifact path).",
+    )
     p.add_argument("--descriptor", default="ear_miewid", help="Source descriptor name.")
     p.add_argument("--out-dim", type=int, default=512, help="Projection output dimension.")
     p.add_argument("--dropout", type=float, default=0.0, help="Dropout probability.")
@@ -727,6 +748,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             early_stop_patience=args.early_stop_patience,
             device_str=args.device,
             partition=args.partition,
+            splits_path=args.splits_file,
         )
     except RuntimeError as exc:
         logger.error("HARD FAIL: %s", exc)

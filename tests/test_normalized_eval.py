@@ -35,6 +35,7 @@ from models.identity_fusion import (
     IdentityLevelScorer,
     IdentityScore,
     QueryResult,
+    _apply_weights_and_rank,
     _average_precision,
     build_oof_identity_scores,
     check_calibration_flatness,
@@ -454,6 +455,60 @@ class TestFitFusionWeights:
             assert abs(w1[ch] - w2[ch]) < 1e-8, (
                 f"fit_fusion_weights is not deterministic for channel '{ch}'"
             )
+
+    def test_vectorized_search_matches_brute_force(self):
+        results = self._build_oof_results(seed=17)
+        channels = ["body_desc", "ear_desc"]
+        vectorized, diagnostics = fit_fusion_weights(
+            results,
+            channels,
+            grid_step=0.25,
+            device="cpu",
+        )
+
+        best_map = -1.0
+        best_top1 = -1.0
+        brute = None
+        for first in np.arange(0.0, 1.01, 0.25):
+            weights = {
+                channels[0]: float(first),
+                channels[1]: float(1.0 - first),
+            }
+            ranked = _apply_weights_and_rank(results, weights, channels)
+            map_score = compute_map(ranked)
+            top1_score = compute_top1(ranked)
+            if map_score > best_map or (
+                abs(map_score - best_map) < 1e-8 and top1_score > best_top1
+            ):
+                brute = weights
+                best_map = map_score
+                best_top1 = top1_score
+
+        assert vectorized == brute
+        assert diagnostics["best_map"] == round(best_map, 6)
+        assert diagnostics["best_top1"] == round(best_top1, 6)
+
+    def test_cuda_search_matches_cpu_when_available(self):
+        torch = pytest.importorskip("torch")
+        if not torch.cuda.is_available():
+            pytest.skip("CUDA unavailable")
+        results = self._build_oof_results(seed=23)
+        channels = ["body_desc", "ear_desc"]
+        cpu_weights, cpu_diagnostics = fit_fusion_weights(
+            results,
+            channels,
+            grid_step=0.25,
+            device="cpu",
+        )
+        cuda_weights, cuda_diagnostics = fit_fusion_weights(
+            results,
+            channels,
+            grid_step=0.25,
+            device="cuda",
+        )
+        assert cuda_weights == cpu_weights
+        assert cuda_diagnostics["best_map"] == cpu_diagnostics["best_map"]
+        assert cuda_diagnostics["best_top1"] == cpu_diagnostics["best_top1"]
 
     def test_empty_results_raises(self):
         with pytest.raises(ValueError, match="no OOF results"):
@@ -1101,9 +1156,8 @@ class TestProtocolCorrectness:
         check_calibration_flatness runs on any fitted calibrator and returns
         the expected diagnostic dict keys with correct types.
         """
-        rng = np.random.default_rng(1)
         n = 30
-        scores = np.concatenate([rng.uniform(0.49, 0.51, n), rng.uniform(0.49, 0.51, n)])
+        scores = np.full(2 * n, 0.5)
         labels = np.concatenate([np.ones(n), np.zeros(n)])
         cal = Calibrator()
         cal.fit(scores, labels)

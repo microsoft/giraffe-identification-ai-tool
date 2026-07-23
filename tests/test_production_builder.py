@@ -668,6 +668,30 @@ def test_rejected_checkpoint_gate_raises(tmp_path):
         build_production_index(root, build_tag="test_gate", dry_run=True)
 
 
+def test_inner_only_checkpoint_gate_raises(tmp_path):
+    root = _build_full_test_artifact_root(
+        tmp_path,
+        n_ref=8,
+        n_qry=2,
+        dim=16,
+        adopted_gate=True,
+    )
+    manifest_path = os.path.join(
+        root,
+        PRODUCTION_CHECKPOINT_SUBDIR,
+        "training_manifest.json",
+    )
+    with open(manifest_path) as handle:
+        manifest = json.load(handle)
+    manifest["gate"]["scope"] = "inner_session_disjoint_validation_only"
+    manifest["gate"]["requires_untouched_query_confirmation"] = True
+    with open(manifest_path, "w") as handle:
+        json.dump(manifest, handle)
+
+    with pytest.raises(AssertionError, match="inner validation gate"):
+        build_production_index(root, build_tag="test_inner_gate", dry_run=True)
+
+
 def test_missing_calibration_manifest_raises(tmp_path):
     """Build must raise FileNotFoundError if calibration manifest is missing."""
     root = _build_full_test_artifact_root(tmp_path, n_ref=8, n_qry=2, dim=16)

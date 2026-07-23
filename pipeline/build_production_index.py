@@ -463,6 +463,17 @@ def build_production_index(
             f"Checkpoint at {ckpt_dir} was not adopted; gate.adopted=False. "
             "Only adopted projection checkpoints may enter production."
         )
+    checkpoint_gate = ckpt_manifest.get("gate", {})
+    if (
+        checkpoint_gate.get("scope")
+        == "inner_session_disjoint_validation_only"
+        and not ckpt_manifest.get("external_gate", {}).get("adopted", False)
+    ):
+        raise AssertionError(
+            f"Checkpoint at {ckpt_dir} passed only the inner validation gate. "
+            "An adopted external_gate from untouched query evaluation is "
+            "required before production."
+        )
 
     # ---- Pre-validate eval artifact existence (before any writes) ---------
     for channel in PRODUCTION_CHANNELS:
