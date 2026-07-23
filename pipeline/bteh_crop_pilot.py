@@ -150,6 +150,12 @@ def _split_bucket(split: Any) -> str:
     return str(split).strip()
 
 
+def _viewpoint_bucket(viewpoint: Any) -> str:
+    if pd.isna(viewpoint) or not str(viewpoint).strip():
+        return "unknown"
+    return str(viewpoint).strip().lower()
+
+
 # ---------------------------------------------------------------------------
 # Fingerprinting
 # ---------------------------------------------------------------------------
@@ -180,8 +186,12 @@ def _assign_strata(df: pd.DataFrame) -> pd.DataFrame:
         df["_split"] = df[split_col].apply(_split_bucket)
     else:
         df["_split"] = "no_split"
+    if "viewpoint" in df.columns:
+        df["_viewpoint"] = df["viewpoint"].apply(_viewpoint_bucket)
+    else:
+        df["_viewpoint"] = "unknown"
 
-    # Composite stratum: individual + split + year + session_source + size + aspect + origin
+    # Composite stratum covers identity, protocol, capture, geometry, and view.
     df["_stratum"] = (
         df["individual_id"].fillna("unknown").astype(str)
         + "|"
@@ -196,6 +206,8 @@ def _assign_strata(df: pd.DataFrame) -> pd.DataFrame:
         + df["_aspect_bucket"].astype(str)
         + "|"
         + df["_origin"].astype(str)
+        + "|"
+        + df["_viewpoint"].astype(str)
     )
     return df
 
@@ -333,8 +345,6 @@ def select_pilot_sample(
         review_df = review_pool.iloc[:0].copy()
 
     # --- Strata report ---
-    strata_cols = ["_stratum", "_split", "_year", "_session_src", "_size_bucket",
-                   "_aspect_bucket", "_origin", "individual_id"]
     strata_report = {
         "n_pilot_requested": n_pilot,
         "n_pilot_selected": len(pilot_df),
@@ -366,6 +376,10 @@ def select_pilot_sample(
             pilot_df["_aspect_bucket"].value_counts().to_dict()
             if "_aspect_bucket" in pilot_df.columns and not pilot_df.empty else {}
         ),
+        "viewpoint_counts": (
+            pilot_df["_viewpoint"].value_counts().to_dict()
+            if "_viewpoint" in pilot_df.columns and not pilot_df.empty else {}
+        ),
         "selected_image_ids": sorted(pilot_df["image_id"].tolist()),
     }
     return pilot_df, review_df, strata_report
@@ -377,7 +391,7 @@ def select_pilot_sample(
 
 _PILOT_INTERNAL_COLS = [
     "_stratum", "_split", "_year", "_session_src",
-    "_size_bucket", "_aspect_bucket", "_origin",
+    "_size_bucket", "_aspect_bucket", "_origin", "_viewpoint",
 ]
 
 
@@ -433,6 +447,7 @@ def write_pilot_manifest(
         "origin_counts": strata_report.get("origin_counts", {}),
         "size_bucket_counts": strata_report.get("size_bucket_counts", {}),
         "aspect_bucket_counts": strata_report.get("aspect_bucket_counts", {}),
+        "viewpoint_counts": strata_report.get("viewpoint_counts", {}),
         "n_identities": strata_report.get("n_identities", 0),
         "selected_image_ids": sorted(keep_pilot["image_id"].tolist()),
     }
@@ -705,6 +720,49 @@ def _compute_human_metrics(
     total_decisive = accepted + rejected
 
     precision = round(accepted / total_decisive, 4) if total_decisive > 0 else None
+    kind_lookup = pilot_crops[["crop_id", "crop_kind"]].rename(
+        columns={"crop_kind": "_manifest_crop_kind"}
+    )
+    reviewed_with_kind = review_for_pilot.merge(
+        kind_lookup,
+        on="crop_id",
+        how="left",
+        validate="many_to_one",
+    )
+    if "crop_kind" in reviewed_with_kind.columns:
+        mismatched_kind = (
+            reviewed_with_kind["crop_kind"].notna()
+            & reviewed_with_kind["_manifest_crop_kind"].notna()
+            & reviewed_with_kind["crop_kind"].ne(
+                reviewed_with_kind["_manifest_crop_kind"]
+            )
+        )
+        if mismatched_kind.any():
+            bad_ids = reviewed_with_kind.loc[mismatched_kind, "crop_id"].tolist()
+            raise ValueError(
+                "Human review CSV crop_kind disagrees with crop manifest for: "
+                f"{bad_ids}"
+            )
+    reviewed_with_kind["crop_kind"] = reviewed_with_kind[
+        "_manifest_crop_kind"
+    ]
+    precision_by_kind: dict[str, dict[str, int | float | None]] = {}
+    for crop_kind, group in reviewed_with_kind.groupby("crop_kind", dropna=True):
+        kind_accepted = int((group["status"] == "accepted").sum())
+        kind_rejected = int((group["status"] == "rejected").sum())
+        kind_uncertain = int((group["status"] == "uncertain").sum())
+        kind_decisive = kind_accepted + kind_rejected
+        precision_by_kind[str(crop_kind)] = {
+            "n_reviewed": len(group),
+            "n_accepted": kind_accepted,
+            "n_rejected": kind_rejected,
+            "n_uncertain": kind_uncertain,
+            "precision": (
+                round(kind_accepted / kind_decisive, 4)
+                if kind_decisive > 0
+                else None
+            ),
+        }
 
     # Rejection reasons: from a 'reason' column if present, otherwise N/A
     rejection_reasons: dict = {}
@@ -725,6 +783,7 @@ def _compute_human_metrics(
         "n_rejected": rejected,
         "n_uncertain": uncertain,
         "precision": precision,
+        "precision_by_kind": precision_by_kind,
         "rejection_reasons": rejection_reasons,
         "note": (
             "Precision = accepted / (accepted + rejected); uncertain crops excluded."
@@ -794,6 +853,15 @@ def write_metric_reports(
                 "value": count,
                 "note": "detector only",
             })
+    for kind, stats in hum.get("precision_by_kind", {}).items():
+        rows_csv.append({
+            "metric": f"human_{kind}_precision",
+            "value": stats.get("precision", ""),
+            "note": (
+                f"{stats.get('n_accepted', 0)} accepted, "
+                f"{stats.get('n_rejected', 0)} rejected"
+            ),
+        })
 
     with open(csv_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["metric", "value", "note"])
@@ -833,6 +901,19 @@ def write_metric_reports(
         f"- Uncertain: {hum.get('n_uncertain', 'N/A')}",
         f"- Precision: **{hum.get('precision', 'N/A')}**",
         f"- Note: _{hum.get('note', '')}_",
+        "",
+        "### Precision by Crop Kind",
+        "",
+        "| Kind | Reviewed | Accepted | Rejected | Uncertain | Precision |",
+        "| ---- | -------- | -------- | -------- | --------- | --------- |",
+    ]
+    for kind, stats in sorted(hum.get("precision_by_kind", {}).items()):
+        md_lines.append(
+            f"| {kind} | {stats.get('n_reviewed', 0)} | "
+            f"{stats.get('n_accepted', 0)} | {stats.get('n_rejected', 0)} | "
+            f"{stats.get('n_uncertain', 0)} | {stats.get('precision', 'N/A')} |"
+        )
+    md_lines += [
         "",
         "## Breakdown by Stratum",
         "",
@@ -1134,23 +1215,31 @@ def cmd_sample(args: argparse.Namespace) -> int:
     manifest = pd.read_parquet(manifest_path)
     logger.info("Loaded manifest: %d rows", len(manifest))
 
-    source_fingerprint = fingerprint_dataframe(manifest, "image_id")
+    source_fingerprint = (
+        args.source_fingerprint
+        if args.source_fingerprint
+        else fingerprint_dataframe(manifest, "image_id")
+    )
 
     splits: pd.DataFrame | None = None
     split_fingerprint: str | None = None
     if splits_path.exists():
         splits = pd.read_parquet(splits_path)
-        split_fingerprint = fingerprint_dataframe_columns(
-            splits,
-            [
-                "image_id",
-                "split",
-                "split_protocol",
-                "evaluable",
-                "fold",
-                "session_id",
-            ],
-            sort_by=["image_id"],
+        split_fingerprint = (
+            args.split_fingerprint
+            if args.split_fingerprint
+            else fingerprint_dataframe_columns(
+                splits,
+                [
+                    "image_id",
+                    "split",
+                    "split_protocol",
+                    "evaluable",
+                    "fold",
+                    "session_id",
+                ],
+                sort_by=["image_id"],
+            )
         )
         logger.info("Loaded splits: %d rows", len(splits))
     else:
@@ -1307,6 +1396,16 @@ def _build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--manifest", default=None, help="Path to bteh_image_manifest.parquet")
     sp.add_argument("--splits", default=None, help="Path to bteh_splits.parquet")
     sp.add_argument("--output-dir", default=None, help="Output directory (default: <artifact-root>/v1/pilot)")
+    sp.add_argument(
+        "--source-fingerprint",
+        default=None,
+        help="Authoritative canonical manifest fingerprint",
+    )
+    sp.add_argument(
+        "--split-fingerprint",
+        default=None,
+        help="Authoritative normalized splits fingerprint",
+    )
     sp.add_argument("--n-pilot", type=int, default=DEFAULT_PILOT_N,
                     help=f"Target pilot sample size (default: {DEFAULT_PILOT_N})")
     sp.add_argument("--n-review", type=int, default=DEFAULT_REVIEW_N,

@@ -30,9 +30,43 @@ Current generated artifacts:
 - Splits: 1,344 gallery, 316 probe, 324 held-out gallery,
   74 held-out probe, and 16 excluded.
 
-Manifest and split generation are complete. Body/ear crop extraction,
-embeddings, and matching have not yet been run for ELPephants. The next
-recommended step is a stratified crop-quality pilot before full processing.
+Manifest and split generation are complete. A deterministic 120-image crop
+pilot spanning 93 identities has also completed:
+
+- Body detector coverage and reviewed precision: 100%.
+- At least one detected ear: 98.33% of images.
+- Reviewed ear precision: 96.32% (131 accepted, 5 rejected).
+- Two detected ears: 15% of images.
+- Overall reviewed crop precision: 98.05% (251/256).
+
+The five rejected ear crops were a trunk, a background/non-target object, a
+front-body/legs crop, an ambiguous multi-elephant body patch, and one severely
+clipped ambiguous ear. The pilot exceeds the 95% precision gate, so resumable
+full-corpus crop extraction is approved. Embeddings and matching remain pending.
+
+Pilot artifacts:
+
+- `$ELPEPHANTS_VERSION_ROOT/pilot/bteh_pilot_manifest.parquet`
+- `$ELPEPHANTS_VERSION_ROOT/pilot/pilot_visual_review.csv`
+- `$ELPEPHANTS_VERSION_ROOT/pilot/report/bteh_pilot_crop_report.json`
+- `$ELPEPHANTS_VERSION_ROOT/pilot/report/contact_sheets/`
+
+## Run the crop-quality pilot
+
+```bash
+python -m pipeline.elephant_crop_pilot sample \
+  --manifest "$ELPEPHANTS_VERSION_ROOT/manifests/elpephants_image_manifest.parquet" \
+  --splits "$ELPEPHANTS_VERSION_ROOT/splits/elpephants_splits.parquet" \
+  --output-dir "$ELPEPHANTS_VERSION_ROOT/pilot" \
+  --source-fingerprint "$SOURCE_FP" \
+  --split-fingerprint "$SPLIT_FP" \
+  --n-pilot 120 \
+  --n-review 0 \
+  --seed 42
+```
+
+The deterministic sample is stratified across identities, evaluation splits,
+years, session provenance, image size/aspect, and viewpoints.
 
 ## Configure roots
 

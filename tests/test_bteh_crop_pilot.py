@@ -576,6 +576,23 @@ def test_human_review_precision(tmp_path):
     assert 0.0 <= hum["precision"] <= 1.0
     assert hum["n_reviewed"] > 0
     assert hum["n_accepted"] + hum["n_rejected"] + hum["n_uncertain"] == hum["n_reviewed"]
+    assert set(hum["precision_by_kind"]) == {"body", "ear"}
+
+
+def test_human_review_accepts_matching_crop_kind_column(tmp_path):
+    crop_df = _make_crop_manifest(["img_1"], n_ears=1)
+    accepted = crop_df[crop_df["detector_status"] == "accepted"]
+    review_path = tmp_path / "review_with_kind.csv"
+    accepted[["crop_id", "crop_kind"]].assign(status="accepted").to_csv(
+        review_path,
+        index=False,
+    )
+    metrics = compute_crop_metrics(
+        pd.DataFrame({"image_id": ["img_1"]}),
+        crop_df,
+        review_csv_path=review_path,
+    )
+    assert set(metrics["human"]["precision_by_kind"]) == {"body", "ear"}
 
 
 def test_human_review_excludes_terminal_placeholders(tmp_path):
@@ -666,7 +683,7 @@ def test_write_pilot_manifest_roundtrip(tmp_path):
     assert "_pilot_role" in reloaded.columns
     # Internal strata columns should be stripped
     internal_cols = {"_stratum", "_split", "_year", "_session_src", "_size_bucket",
-                     "_aspect_bucket", "_origin"}
+                     "_aspect_bucket", "_origin", "_viewpoint"}
     assert internal_cols.isdisjoint(set(reloaded.columns)), (
         "Internal stratum columns must not appear in the written parquet"
     )
