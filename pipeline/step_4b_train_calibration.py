@@ -34,6 +34,7 @@ from configs.config_elephant import (
     CALIBRATION_DIR,
     LOCAL_MATCHER_MIN_INLIERS,
     CROP_SUBDIR,
+    INDEX_PARQUET_FILENAME,
 )
 from models.calibration import Calibrator
 
@@ -65,7 +66,9 @@ def _load_ref_embeddings(root_dir, partition):
     emb_dir = os.path.join(root_dir, f"{partition}_dir", EMBEDDINGS_SUBDIR)
     matrices = {}
     for desc in ACTIVE_DESCRIPTORS:
-        npy_path = os.path.join(emb_dir, f"{partition}_{desc}.npy")
+        normalized_path = os.path.join(emb_dir, f"{desc}.npy")
+        legacy_path = os.path.join(emb_dir, f"{partition}_{desc}.npy")
+        npy_path = normalized_path if os.path.isfile(normalized_path) else legacy_path
         if not os.path.isfile(npy_path):
             logger.warning("Embedding file not found: %s", npy_path)
             matrices[desc] = None
@@ -73,6 +76,61 @@ def _load_ref_embeddings(root_dir, partition):
             matrices[desc] = np.load(npy_path).astype(np.float32)
             logger.info("Loaded %s/%s embeddings %s", partition, desc, matrices[desc].shape)
     return matrices
+
+
+def load_descriptor_mapping(desc, partition_dir):
+    """Load one normalized descriptor mapping, with a warned legacy fallback."""
+    embeddings_dir = os.path.join(partition_dir, EMBEDDINGS_SUBDIR)
+    mapping_path = os.path.join(embeddings_dir, f"{desc}_mapping.parquet")
+    if os.path.isfile(mapping_path):
+        mapping = pd.read_parquet(mapping_path)
+        required = {"image_id", "individual_id", "embedding_row", "crop_id"}
+        missing = sorted(required - set(mapping.columns))
+        if missing:
+            raise ValueError(
+                f"descriptor mapping {mapping_path!r} is missing columns: {missing}"
+            )
+        return mapping
+
+    warning = (
+        f"Normalized descriptor mapping not found for {desc!r}; "
+        "falling back to the legacy wide index parquet"
+    )
+    logger.warning(warning)
+    warnings.warn(warning, RuntimeWarning, stacklevel=2)
+    partition_name = os.path.basename(os.path.normpath(partition_dir))
+    if partition_name.endswith("_dir"):
+        partition_name = partition_name[:-4]
+    candidates = [
+        os.path.join(
+            embeddings_dir, f"{partition_name}_{INDEX_PARQUET_FILENAME}"
+        ),
+        os.path.join(embeddings_dir, INDEX_PARQUET_FILENAME),
+    ]
+    legacy_path = next((path for path in candidates if os.path.isfile(path)), None)
+    if legacy_path is None:
+        raise FileNotFoundError(
+            f"neither {mapping_path!r} nor a legacy index parquet exists; tried {candidates}"
+        )
+    legacy = pd.read_parquet(legacy_path)
+    row_column = f"{desc}_row"
+    required_legacy = {IMAGE_ID_COL, ID_COL, row_column}
+    missing = sorted(required_legacy - set(legacy.columns))
+    if missing:
+        raise ValueError(f"legacy index {legacy_path!r} is missing columns: {missing}")
+    crop_ids = (
+        legacy["crop_id"].astype(str)
+        if "crop_id" in legacy.columns
+        else legacy[IMAGE_ID_COL].astype(str) + "__legacy"
+    )
+    return pd.DataFrame(
+        {
+            "image_id": legacy[IMAGE_ID_COL].astype(str),
+            "individual_id": legacy[ID_COL].astype(str),
+            "embedding_row": legacy[row_column].astype(int),
+            "crop_id": crop_ids,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +149,12 @@ def _load_crop(crop_path):
 # All-pairs calibration scoring
 # ---------------------------------------------------------------------------
 
-def run_all_pairs(metadata_df, emb_matrices, index_df):
+def run_all_pairs(
+    metadata_df,
+    emb_matrices,
+    index_df=None,
+    descriptor_mappings=None,
+):
     """
     Computes all pairwise cosine similarities within the reference partition.
     Labels: 1 if the pair shares the same individual_id, 0 otherwise.
@@ -99,48 +162,104 @@ def run_all_pairs(metadata_df, emb_matrices, index_df):
 
     Returns desc_data and local_data in the format expected by main().
     """
-    if index_df.empty:
-        logger.error("Index parquet is empty. Run step_2 for the reference partition first.")
-        sys.exit(1)
-
-    img_id_to_idx_row = {str(r[IMAGE_ID_COL]): r for _, r in index_df.iterrows()}
+    using_legacy_index = descriptor_mappings is None
+    if descriptor_mappings is None:
+        if index_df is None or index_df.empty:
+            raise ValueError(
+                "descriptor mappings and legacy index parquet are both unavailable"
+            )
+        descriptor_mappings = {}
+        for desc in ACTIVE_DESCRIPTORS:
+            row_column = f"{desc}_row"
+            if row_column not in index_df.columns:
+                raise ValueError(
+                    f"legacy index parquet is missing required column {row_column!r}"
+                )
+            descriptor_mappings[desc] = pd.DataFrame(
+                {
+                    "image_id": index_df[IMAGE_ID_COL].astype(str),
+                    "individual_id": index_df[ID_COL].astype(str),
+                    "embedding_row": index_df[row_column].astype(int),
+                    "crop_id": (
+                        index_df["crop_id"].astype(str)
+                        if "crop_id" in index_df.columns
+                        else index_df[IMAGE_ID_COL].astype(str) + "__legacy"
+                    ),
+                }
+            )
 
     desc_data = {desc: {"scores": [], "labels": [], "fold_top1": []} for desc in ACTIVE_DESCRIPTORS}
     local_data = {"scores": [], "labels": [], "fold_top1": []}
 
-    # Build ordered lists of (individual_id, emb_row) aligned across descriptors
-    individual_ids = []
-    emb_row_map = {desc: [] for desc in ACTIVE_DESCRIPTORS}
-
-    for _, row in metadata_df.iterrows():
-        img_id = str(row.get(IMAGE_ID_COL, "")) if IMAGE_ID_COL in row.index else ""
-        if not img_id:
-            continue
-        idx_row = img_id_to_idx_row.get(img_id)
-        if idx_row is None:
-            logger.debug("No index row for image_id='%s'; skipping.", img_id)
-            continue
-        individual_ids.append(str(row[ID_COL]))
-        for desc in ACTIVE_DESCRIPTORS:
-            col = f"{desc}_row"
-            emb_row_map[desc].append(int(idx_row[col]) if col in idx_row.index else None)
-
-    individual_ids = np.array(individual_ids)
-    n = len(individual_ids)
-    logger.info("All-pairs scoring over %d images (%d individuals).", n, len(np.unique(individual_ids)))
+    if IMAGE_ID_COL not in metadata_df.columns or ID_COL not in metadata_df.columns:
+        raise ValueError(
+            f"metadata must contain {IMAGE_ID_COL!r} and {ID_COL!r} for calibration"
+        )
+    metadata_identities = metadata_df.set_index(
+        metadata_df[IMAGE_ID_COL].astype(str)
+    )[ID_COL].astype(str)
 
     for desc in ACTIVE_DESCRIPTORS:
-        if emb_matrices[desc] is None:
+        if emb_matrices.get(desc) is None:
+            continue
+        if desc not in descriptor_mappings:
+            raise ValueError(f"descriptor mapping is missing for {desc!r}")
+        mapping = descriptor_mappings[desc]
+        required = {"image_id", "individual_id", "embedding_row", "crop_id"}
+        missing_columns = sorted(required - set(mapping.columns))
+        if missing_columns:
+            raise ValueError(
+                f"descriptor mapping for {desc!r} is missing columns: {missing_columns}"
+            )
+        if mapping.empty:
             continue
 
-        rows = emb_row_map[desc]
-        valid_idx = [i for i in range(n) if rows[i] is not None]
-        if not valid_idx:
-            continue
+        if using_legacy_index:
+            missing_mappings = sorted(
+                set(metadata_df[IMAGE_ID_COL].astype(str))
+                - set(mapping["image_id"].astype(str))
+            )
+            if missing_mappings:
+                raise AssertionError(
+                    f"legacy descriptor {desc!r} has metadata image_ids with no index join: "
+                    f"{missing_mappings}"
+                )
 
-        emb = emb_matrices[desc][[rows[i] for i in valid_idx]]  # (n_valid, D)
-        ids = individual_ids[valid_idx]
-        n_valid = len(valid_idx)
+        unknown_images = sorted(
+            set(mapping["image_id"].astype(str)) - set(metadata_identities.index)
+        )
+        if unknown_images:
+            raise AssertionError(
+                f"descriptor {desc!r} mapping image_ids are missing from metadata: "
+                f"{unknown_images}"
+            )
+        expected_ids = mapping["image_id"].astype(str).map(metadata_identities)
+        mismatches = mapping[
+            expected_ids.to_numpy() != mapping["individual_id"].astype(str).to_numpy()
+        ]
+        if not mismatches.empty:
+            values = mismatches[["image_id", "individual_id"]].to_dict("records")
+            raise AssertionError(
+                f"descriptor {desc!r} individual_id join mismatch: {values}"
+            )
+
+        rows = mapping["embedding_row"].astype(int).tolist()
+        matrix = emb_matrices[desc]
+        out_of_range = [row for row in rows if row < 0 or row >= len(matrix)]
+        if out_of_range:
+            raise AssertionError(
+                f"descriptor {desc!r} embedding rows out of range for "
+                f"matrix length {len(matrix)}: {out_of_range}"
+            )
+        emb = matrix[rows]
+        ids = mapping["individual_id"].astype(str).to_numpy()
+        n_valid = len(mapping)
+        logger.info(
+            "[%s] all-pairs scoring over %d crops (%d individuals).",
+            desc,
+            n_valid,
+            len(np.unique(ids)),
+        )
 
         # Full cosine similarity matrix (embeddings are L2-normalised)
         sim_matrix = emb @ emb.T  # (n_valid, n_valid)
@@ -226,24 +345,6 @@ def main():
     # Load embeddings
     emb_matrices = _load_ref_embeddings(root_dir, partition)
 
-    # Load index parquet
-    index_df = load_index_parquet(root_dir, partition)
-    if index_df.empty:
-        # Fall back to the naming convention used in step_2 ({partition}_{INDEX_PARQUET_FILENAME})
-        from configs.config_elephant import INDEX_PARQUET_FILENAME
-        alt_path = os.path.join(partition_dir, EMBEDDINGS_SUBDIR, f"{partition}_{INDEX_PARQUET_FILENAME}")
-        if os.path.isfile(alt_path):
-            index_df = pd.read_parquet(alt_path)
-            print(f"Loaded index parquet from alternate path: {alt_path}")
-        else:
-            print("ERROR: index parquet not found. Run step_2 for the reference partition first.")
-            restore_stdout(log_file_std_output, log_file_err_output)
-            sys.exit(1)
-
-    # Ensure IMAGE_ID_COL is present in index_df
-    if IMAGE_ID_COL not in index_df.columns and "image_id" in index_df.columns:
-        index_df = index_df.rename(columns={"image_id": IMAGE_ID_COL})
-
     # Ensure metadata has IMAGE_ID_COL
     if IMAGE_ID_COL not in metadata_df.columns:
         metadata_df[IMAGE_ID_COL] = metadata_df["path_relative_to_root"].apply(
@@ -251,7 +352,15 @@ def main():
         )
 
     # Run all-pairs scoring for calibration
-    desc_data, local_data = run_all_pairs(metadata_df, emb_matrices, index_df)
+    descriptor_mappings = {
+        desc: load_descriptor_mapping(desc, partition_dir)
+        for desc in ACTIVE_DESCRIPTORS
+    }
+    desc_data, local_data = run_all_pairs(
+        metadata_df,
+        emb_matrices,
+        descriptor_mappings=descriptor_mappings,
+    )
 
     # Top-1 accuracy report (closed-set, per image)
     all_top1 = desc_data[ACTIVE_DESCRIPTORS[0]]["fold_top1"]

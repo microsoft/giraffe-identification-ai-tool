@@ -36,7 +36,13 @@ def test_isotonic_fit_transform_monotone():
     assert np.all(diffs >= -1e-6), "transform output is not monotonically non-decreasing"
 
 
-def test_temperature_fit_transform():
+def test_platt_fallback_fit_transform():
+    """Low-support calibration now uses Platt (logistic) scaling, not temperature.
+
+    temperature expit(score/T) was replaced because it cannot represent
+    probabilities < 0.5 for positive cosine scores (score > 0 → prob > 0.5).
+    Platt scaling with a fitted intercept covers the full [0, 1] range.
+    """
     rng = np.random.default_rng(seed=42)
     n_pos = MIN_POSITIVE_PAIRS_FOR_ISOTONIC - 1
     scores, labels = _make_scores_labels(rng, n_pos, n_pos)
@@ -44,13 +50,27 @@ def test_temperature_fit_transform():
     cal = Calibrator()
     cal.fit(scores, labels)
 
-    assert cal.method == "temperature"
+    # Method must now be 'platt', not 'temperature'.
+    assert cal.method == Calibrator.PLATT, (
+        f"Expected 'platt' fallback; got '{cal.method}'. "
+        "The temperature fallback was replaced because expit(s/T) cannot "
+        "represent probs < 0.5 for positive cosine scores."
+    )
 
     test_scores = rng.uniform(-2.0, 2.0, size=100)
     out = cal.transform(test_scores)
 
-    assert np.all(out >= 0.0), "temperature output contains values < 0"
-    assert np.all(out <= 1.0), "temperature output contains values > 1"
+    assert np.all(out >= 0.0), "Platt output contains values < 0"
+    assert np.all(out <= 1.0), "Platt output contains values > 1"
+
+
+def test_explicit_platt_with_high_support():
+    scores = np.linspace(0.1, 0.9, 500)
+    labels = np.concatenate([np.zeros(250), np.ones(250)])
+    cal = Calibrator().fit(scores, labels, method="platt")
+    assert cal.method == Calibrator.PLATT
+    transformed = cal.transform(np.array([0.2, 0.8]))
+    assert transformed[0] < transformed[1]
 
 
 def test_calibrator_save_load_roundtrip(tmp_path):

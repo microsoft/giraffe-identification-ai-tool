@@ -55,14 +55,42 @@ GLOBAL_DESCRIPTORS = {
 }
 ACTIVE_DESCRIPTORS = ["megadescriptor", "miewid", "ear_megadescriptor", "ear_miewid"]
 
-# Descriptors that embed the ear crop instead of the whole-animal crop
-EAR_DESCRIPTORS = {"ear_megadescriptor", "ear_miewid"}
+# Descriptors that embed the ear crop instead of the whole-animal crop.
+# ear_miewid_projected is the projection-adapted variant produced by
+# pipeline/transform_miewid_projection.py; it uses ear crops and must be
+# treated identically to ear_miewid for crop-kind routing.
+EAR_DESCRIPTORS = {"ear_megadescriptor", "ear_miewid", "ear_miewid_projected"}
+
+# ---------------------------------------------------------------------------
+# BTEH production-selected channels (frozen after model selection)
+# These are separate from ACTIVE_DESCRIPTORS (which governs experimental runs).
+# Do NOT add MegaDescriptor here: it received zero OOF weight and provides no
+# retrieval signal for BTEH.
+# ---------------------------------------------------------------------------
+PRODUCTION_SELECTED_CHANNELS: list[str] = ["miewid", "ear_miewid_projected"]
+
+PRODUCTION_FUSION_WEIGHTS: dict[str, float] = {
+    "miewid": 0.6,
+    "ear_miewid_projected": 0.4,
+}
+
+PRODUCTION_CALIBRATION_SUBDIR: str = "calibration_projected"
 
 # ---------------------------------------------------------------------------
 # Matching / fusion
 # ---------------------------------------------------------------------------
 SHORTLIST_K          = 50          # FAISS candidates passed to local re-ranker
-MATCH_ACCEPT_THRESHOLD = 0.70      # fused calibrated score → "matched"
+
+# MATCH_ACCEPT_THRESHOLD is intentionally NOT set for BTEH production.
+# The open-set threshold has FAR≈27% / FRR≈48% and is unsafe for automatic
+# identity acceptance or new-identity creation.  Production must surface ranked
+# top candidates for expert human verification only.
+# The calibrated threshold value (0.175) is recorded in the production manifest
+# for reference but must never be used to auto-accept or auto-create identities.
+#
+# For legacy giraffe pipeline compatibility this constant is kept but at a
+# deliberately conservative value that requires expert sign-off:
+MATCH_ACCEPT_THRESHOLD = 0.70      # giraffe pipeline default — NOT used for BTEH auto-matching
 NUM_RECOMMENDED_IDS  = 3           # top-N to surface in UI
 
 # Fusion weights (must sum to 1; set equal for now, tune after ablation)
@@ -87,6 +115,22 @@ CALIBRATION_DIR                 = "calibration"
 LOCAL_MATCHER_BACKEND   = "lightglue"   # "lightglue" | "loftr"
 LOCAL_MATCHER_KEYPOINTS = 2048
 LOCAL_MATCHER_MIN_INLIERS = 15
+
+# Strict experimental local matcher settings
+# LoFTR must be explicitly approved before use (pilot-only gate).
+LOCAL_MATCHER_LOFTR_PILOT_APPROVED: bool = False
+
+# Feature cache: maximum number of entries held in the memory LRU front-cache.
+LOCAL_FEATURE_CACHE_MAX_LRU: int = 256
+
+# Identity scorer: maximum number of reference sessions to use.
+LOCAL_IDENTITY_SCORER_MAX_SESSIONS: int = 3
+
+# Identity scorer: primary aggregation uses mean of this many top valid pairs.
+LOCAL_IDENTITY_SCORER_TOP_K: int = 2
+
+# Local score schema version (bump when schema fields change incompatibly).
+LOCAL_SCORE_SCHEMA_VERSION: str = "local-v1"
 
 # ---------------------------------------------------------------------------
 # New individual ID minting

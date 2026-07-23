@@ -115,6 +115,101 @@ class WildFusionMatcher:
 
         return list(candidates.values())
 
+    def _mapping_meta(self, desc: str, faiss_row: int) -> tuple:
+        meta = self.ref_meta[desc]
+        if hasattr(meta, "columns"):
+            matches = meta[meta["faiss_row"].astype("Int64") == faiss_row]
+            if len(matches) != 1:
+                raise AssertionError(
+                    f"descriptor {desc!r} has {len(matches)} mapping rows for faiss_row={faiss_row}"
+                )
+            row = matches.iloc[0]
+            return (
+                str(row["individual_id"]),
+                str(row["image_id"]),
+                str(row["crop_path"]),
+                str(row.get("viewpoint", "unknown")),
+            )
+        if faiss_row < 0 or faiss_row >= len(meta):
+            raise IndexError(
+                f"descriptor {desc!r} FAISS row {faiss_row} has no reference metadata"
+            )
+        return meta[faiss_row]
+
+    def _query_vector_from_mapping(self, desc: str, record: dict) -> np.ndarray:
+        for key in ("embedding", "vector", "query_vector"):
+            if key in record:
+                return np.asarray(record[key], dtype=np.float32)
+        embedding_row = int(record["embedding_row"])
+        source = record.get("embedding_matrix")
+        if source is None:
+            source = getattr(self, "query_embedding_matrices", {}).get(desc)
+        if source is None:
+            source = self.embedders.get(desc)
+        if isinstance(source, np.ndarray):
+            return np.asarray(source[embedding_row], dtype=np.float32)
+        for attribute in ("embedding_matrix", "embeddings", "matrix"):
+            matrix = getattr(source, attribute, None)
+            if matrix is not None:
+                return np.asarray(matrix[embedding_row], dtype=np.float32)
+        raise ValueError(
+            f"query record for descriptor {desc!r}, embedding_row={embedding_row} "
+            "does not provide an embedding vector or matrix"
+        )
+
+    def shortlist_from_mappings(
+        self,
+        query_descriptor_records: dict[str, list[dict]],
+    ) -> list[dict]:
+        """Shortlist candidates from descriptor-local sparse query mappings."""
+        candidates: dict[str, dict] = {}
+        comparison_scores: dict[tuple[str, str], float] = {}
+
+        for desc, records in query_descriptor_records.items():
+            if desc not in self.faiss_indexes or not records:
+                continue
+            index = self.faiss_indexes[desc]
+            for record in records:
+                query_vector = self._query_vector_from_mapping(desc, record).reshape(1, -1)
+                distances, indices = index.search(
+                    query_vector.astype(np.float32), self.shortlist_k
+                )
+                for faiss_row, raw_similarity in zip(indices[0], distances[0]):
+                    if faiss_row < 0:
+                        continue
+                    ind_id, image_id, crop_path, viewpoint = self._mapping_meta(
+                        desc, int(faiss_row)
+                    )
+                    similarity = float(raw_similarity)
+                    calibrated = (
+                        float(
+                            self.calibrators[desc].transform(
+                                np.asarray([similarity], dtype=np.float64)
+                            )[0]
+                        )
+                        if desc in self.calibrators
+                        else similarity
+                    )
+                    candidate = candidates.setdefault(
+                        image_id,
+                        {
+                            "individual_id": ind_id,
+                            "image_id": image_id,
+                            "crop_path": crop_path,
+                            "viewpoint": viewpoint,
+                            "global_sims": {},
+                            "faiss_score": similarity,
+                        },
+                    )
+                    score_key = (image_id, desc)
+                    if calibrated > comparison_scores.get(score_key, -np.inf):
+                        comparison_scores[score_key] = calibrated
+                        candidate["global_sims"][desc] = similarity
+                    candidate["faiss_score"] = max(
+                        candidate["faiss_score"], similarity
+                    )
+        return list(candidates.values())
+
     # ------------------------------------------------------------------
     # Step 2 – Local re-rank
     # ------------------------------------------------------------------
@@ -244,4 +339,47 @@ class WildFusionMatcher:
             )
 
         recommendations.sort(key=lambda r: r.fused_sim, reverse=True)
+        return recommendations[:NUM_RECOMMENDED_IDS]
+
+    def identify_from_mappings(
+        self,
+        query_descriptor_records: dict[str, list[dict]],
+        query_crop_bgr: np.ndarray,
+    ) -> list:
+        """Run sparse descriptor mapping shortlist, local rerank, and fusion."""
+        candidates = self.shortlist_from_mappings(query_descriptor_records)
+        if not candidates:
+            return []
+        candidates = self.rerank(query_crop_bgr, candidates)
+
+        recommendations = []
+        for cand in candidates:
+            local_inliers = cand.get("local_inliers", 0)
+            global_sims = cand.get("global_sims", {})
+            fused_sim = self.fuse(global_sims, local_inliers)
+            if self.calibrators and "local" in self.calibrators:
+                local_raw = float(local_inliers) / (float(local_inliers) + 20.0)
+                local_sim = float(
+                    self.calibrators["local"].transform(np.array([local_raw]))[0]
+                )
+            else:
+                local_sim = (
+                    float(local_inliers) / (float(local_inliers) + 20.0)
+                    if local_inliers > 0
+                    else 0.0
+                )
+            recommendations.append(
+                Recommendation(
+                    individual_id=cand["individual_id"],
+                    image_id=cand["image_id"],
+                    crop_path=cand["crop_path"],
+                    viewpoint=cand.get("viewpoint", "unknown"),
+                    fused_sim=fused_sim,
+                    global_sims=global_sims,
+                    local_inliers=local_inliers,
+                    local_sim=local_sim,
+                    viz_payload=cand.get("viz_payload", {}),
+                )
+            )
+        recommendations.sort(key=lambda recommendation: recommendation.fused_sim, reverse=True)
         return recommendations[:NUM_RECOMMENDED_IDS]

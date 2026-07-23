@@ -45,6 +45,11 @@
     - [New columns | updating reference catalog with processd query images](#new-columns--updating-reference-catalog-with-processd-query-images)
   - [**User Authentication**](#user-authentication)
 
+## Elephant re-identification runbooks
+
+- [BTEH production pipeline](BTEH_production_runbook.md)
+- [ELPephants source and shared pipeline](ELPephants_pipeline_runbook.md)
+
 ## **Software Dependencies**
 
 Set up the environment by creating a new conda environment and run:

@@ -33,6 +33,12 @@ from configs.config_elephant import (
     VIEWPOINT_COL,
 )
 from models.embedder import GlobalEmbedder
+from configs.config_artifacts import ARTIFACT_SCHEMA_VERSION
+from utils.artifact_schema import (
+    DESCRIPTOR_MAPPING_COLUMNS,
+    DESCRIPTOR_MAPPING_DTYPES,
+    assert_descriptor_mapping_integrity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +180,306 @@ def build_faiss_index(embeddings: np.ndarray) -> faiss.Index:
     return index
 
 
+def _empty_descriptor_mapping() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            column: pd.Series(dtype=dtype)
+            for column, dtype in DESCRIPTOR_MAPPING_DTYPES.items()
+        }
+    )
+
+
+def embed_from_crop_manifest(
+    crop_manifest: pd.DataFrame,
+    embedder,
+    descriptor_name: str,
+    *,
+    is_ear: bool = False,
+    apply_clahe_to_ear: bool = True,
+) -> tuple[pd.DataFrame, np.ndarray]:
+    """Embed readable accepted crops without creating placeholder vectors."""
+    required = {
+        "crop_id",
+        "image_id",
+        "crop_kind",
+        "crop_ordinal",
+        "crop_path",
+        "detector_status",
+        "schema_version",
+        "source_fingerprint",
+        "split_fingerprint",
+    }
+    missing = sorted(required - set(crop_manifest.columns))
+    if missing:
+        raise ValueError(f"crop manifest is missing columns required for embedding: {missing}")
+
+    crop_kind = "ear" if is_ear else "body"
+    selected = crop_manifest[
+        (crop_manifest["detector_status"] == "accepted")
+        & (crop_manifest["crop_kind"] == crop_kind)
+    ].copy()
+    selected = selected.sort_values(
+        ["image_id", "crop_ordinal", "crop_id"], kind="stable"
+    )
+
+    # -----------------------------------------------------------------------
+    # Blocker 2: require non-empty individual_id for every accepted crop that
+    # enters an embedding matrix.  An empty string here would silently produce
+    # a descriptor mapping that cannot be used for identity-aware evaluation.
+    # -----------------------------------------------------------------------
+    if "individual_id" not in selected.columns:
+        raise ValueError(
+            "crop manifest is missing 'individual_id'; populate it from the "
+            "canonical image manifest before embedding"
+        )
+    empty_individual = (
+        selected["individual_id"].isna()
+        | selected["individual_id"].astype(str).str.strip().eq("")
+    )
+    if empty_individual.any():
+        bad_crops = selected.loc[empty_individual, "crop_id"].tolist()
+        raise ValueError(
+            f"accepted crops have empty individual_id; cannot embed: {bad_crops}"
+        )
+
+    images: list[np.ndarray] = []
+    rows: list[pd.Series] = []
+    for _, crop_row in selected.iterrows():
+        image = cv2.imread(str(crop_row["crop_path"]))
+        if image is None:
+            raise OSError(
+                f"accepted crop is unreadable: {crop_row['crop_path']}"
+            )
+        if is_ear and apply_clahe_to_ear:
+            image = _apply_clahe(image)
+        images.append(image)
+        rows.append(crop_row)
+
+    if not images:
+        return _empty_descriptor_mapping(), np.empty(
+            (0, int(embedder.dim)), dtype=np.float32
+        )
+
+    matrix = np.asarray(
+        embedder.embed_batch(images, batch_size=_BATCH_SIZE), dtype=np.float32
+    )
+    if matrix.ndim != 2 or matrix.shape != (len(images), int(embedder.dim)):
+        raise AssertionError(
+            f"embedder returned shape {matrix.shape}; expected {(len(images), int(embedder.dim))}"
+        )
+    if not np.isfinite(matrix).all():
+        raise AssertionError("embedder returned non-finite vectors")
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    if np.any(norms == 0):
+        bad_rows = np.where(norms[:, 0] == 0)[0].tolist()
+        raise AssertionError(f"embedder returned zero-norm vectors at rows {bad_rows}")
+    matrix = matrix / norms
+
+    mapping_records = []
+    for embedding_row, crop_row in enumerate(rows):
+        mapping_records.append(
+            {
+                "descriptor_name": descriptor_name,
+                "embedding_row": embedding_row,
+                "faiss_row": pd.NA,
+                "crop_id": str(crop_row["crop_id"]),
+                "image_id": str(crop_row["image_id"]),
+                "individual_id": str(crop_row.get("individual_id", "")),
+                "crop_kind": str(crop_row["crop_kind"]),
+                "crop_ordinal": int(crop_row["crop_ordinal"]),
+                "crop_path": os.path.abspath(str(crop_row["crop_path"])),
+                "schema_version": str(crop_row["schema_version"]),
+                "source_fingerprint": crop_row.get("source_fingerprint"),
+                "split_fingerprint": crop_row.get("split_fingerprint"),
+                "model_preprocess_fingerprint": None,
+            }
+        )
+    mapping_df = pd.DataFrame(mapping_records, columns=DESCRIPTOR_MAPPING_COLUMNS)
+    for column, dtype in DESCRIPTOR_MAPPING_DTYPES.items():
+        mapping_df[column] = mapping_df[column].astype(dtype)
+    return mapping_df, matrix.astype(np.float32, copy=False)
+
+
+def build_bteh_descriptor_artifacts(
+    crop_manifest: pd.DataFrame,
+    embedder_factory,
+    descriptor_name: str,
+    artifact_dir: str,
+    *,
+    is_reference: bool,
+    is_ear: bool = False,
+    schema_version: str = ARTIFACT_SCHEMA_VERSION,
+    source_fingerprint: str | None = None,
+    split_fingerprint: str | None = None,
+    model_fingerprint: str | None = None,
+) -> tuple[pd.DataFrame, np.ndarray]:
+    """Build and validate one descriptor's normalized elephant artifacts."""
+    def _resolve_provenance(column: str, supplied: str | None) -> str | None:
+        values = {
+            str(value)
+            for value in crop_manifest[column].dropna().unique()
+            if str(value)
+        }
+        if len(values) > 1:
+            raise ValueError(
+                f"crop manifest has multiple {column} values: {sorted(values)}"
+            )
+        inherited = next(iter(values), None)
+        if supplied is not None and inherited != supplied:
+            raise ValueError(
+                f"{column} mismatch: crop manifest has {inherited!r}, "
+                f"caller supplied {supplied!r}"
+            )
+        return inherited
+
+    resolved_source_fingerprint = _resolve_provenance(
+        "source_fingerprint",
+        source_fingerprint,
+    )
+    resolved_split_fingerprint = _resolve_provenance(
+        "split_fingerprint",
+        split_fingerprint,
+    )
+    embedder = embedder_factory(descriptor_name)
+    mapping_df, matrix = embed_from_crop_manifest(
+        crop_manifest,
+        embedder,
+        descriptor_name,
+        is_ear=is_ear,
+    )
+    mapping_df["schema_version"] = schema_version
+    mapping_df["source_fingerprint"] = resolved_source_fingerprint
+    mapping_df["split_fingerprint"] = resolved_split_fingerprint
+    mapping_df["model_preprocess_fingerprint"] = model_fingerprint
+    if is_reference:
+        mapping_df["faiss_row"] = pd.Series(
+            range(len(mapping_df)), dtype=DESCRIPTOR_MAPPING_DTYPES["faiss_row"]
+        )
+        index = build_faiss_index(matrix)
+    else:
+        mapping_df["faiss_row"] = pd.Series(
+            [pd.NA] * len(mapping_df), dtype=DESCRIPTOR_MAPPING_DTYPES["faiss_row"]
+        )
+        index = None
+
+    for column, dtype in DESCRIPTOR_MAPPING_DTYPES.items():
+        mapping_df[column] = mapping_df[column].astype(dtype)
+
+    assert_descriptor_mapping_integrity(
+        mapping_df,
+        matrix,
+        index,
+        is_reference=is_reference,
+        schema_version=schema_version,
+        expected_source_fingerprint=resolved_source_fingerprint,
+        expected_split_fingerprint=resolved_split_fingerprint,
+        expected_model_fingerprint=model_fingerprint,
+    )
+
+    os.makedirs(artifact_dir, exist_ok=True)
+    mapping_df.to_parquet(
+        os.path.join(artifact_dir, f"{descriptor_name}_mapping.parquet"),
+        index=False,
+    )
+    np.save(os.path.join(artifact_dir, f"{descriptor_name}.npy"), matrix)
+    if is_reference:
+        faiss.write_index(index, os.path.join(artifact_dir, f"{descriptor_name}.index"))
+    return mapping_df, matrix
+
+
+build_normalized_descriptor_artifacts = build_bteh_descriptor_artifacts
+
+
+def _normalized_main(*, use_bteh_defaults: bool = False):
+    """Normalized embedding route for canonical elephant crop manifests."""
+    default_artifact_dir = None
+    if use_bteh_defaults:
+        from configs.config_bteh import (
+            ARTIFACT_VERSION_ROOT,
+            EMBEDDINGS_SUBDIR_BTEH,
+        )
+        default_artifact_dir = str(
+            ARTIFACT_VERSION_ROOT / EMBEDDINGS_SUBDIR_BTEH
+        )
+    from configs.config_elephant import EAR_DESCRIPTORS
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Normalized elephant embedding: build descriptor mapping, "
+            "embedding matrix, and reference FAISS index from a crop manifest."
+        )
+    )
+    parser.add_argument(
+        "--crop-manifest",
+        required=True,
+        help="Path to the normalized crop manifest parquet.",
+    )
+    parser.add_argument(
+        "--artifact-dir",
+        default=default_artifact_dir,
+        required=not use_bteh_defaults,
+        help="Directory to write mapping/matrix/index artifacts.",
+    )
+    parser.add_argument(
+        "--partition",
+        choices=["query", "reference"],
+        required=True,
+        help="'reference' builds a FAISS index; 'query' skips it.",
+    )
+    parser.add_argument(
+        "--descriptors",
+        nargs="+",
+        default=list(ACTIVE_DESCRIPTORS),
+        help="Descriptor names to build (default: all ACTIVE_DESCRIPTORS).",
+    )
+    parser.add_argument("--schema-version", default=ARTIFACT_SCHEMA_VERSION)
+    parser.add_argument("--source-fingerprint", required=True)
+    parser.add_argument("--split-fingerprint", required=True)
+    parser.add_argument("--model-fingerprint", required=True)
+    parser.add_argument(
+        "--disable-cudnn",
+        action="store_true",
+        help="Disable cuDNN and use generic CUDA kernels for incompatible hosts.",
+    )
+    args = parser.parse_args()
+
+    if args.disable_cudnn:
+        import torch
+        torch.backends.cudnn.enabled = False
+
+    crop_manifest = pd.read_parquet(args.crop_manifest)
+    is_reference = args.partition == "reference"
+
+    for desc in args.descriptors:
+        is_ear = desc in EAR_DESCRIPTORS
+
+        def _factory(d=desc):
+            return GlobalEmbedder(backend=d)
+
+        logger.info(
+            "=== normalized descriptor: %s (ear=%s) ===",
+            desc,
+            is_ear,
+        )
+        build_bteh_descriptor_artifacts(
+            crop_manifest=crop_manifest,
+            embedder_factory=_factory,
+            descriptor_name=desc,
+            artifact_dir=args.artifact_dir,
+            is_reference=is_reference,
+            is_ear=is_ear,
+            schema_version=args.schema_version,
+            source_fingerprint=args.source_fingerprint,
+            split_fingerprint=args.split_fingerprint,
+            model_fingerprint=args.model_fingerprint,
+        )
+        logger.info("Artifacts written to %s", args.artifact_dir)
+
+
+def _bteh_main():
+    _normalized_main(use_bteh_defaults=True)
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -275,13 +581,34 @@ def main(partition: str):
 
 
 if __name__ == "__main__":
+    normalized_flags = {
+        flag
+        for flag in ("--bteh", "--normalized")
+        if flag in sys.argv[1:]
+    }
+    if len(normalized_flags) > 1:
+        raise SystemExit("--bteh and --normalized are mutually exclusive")
+    if normalized_flags:
+        flag = normalized_flags.pop()
+        sys.argv = [sys.argv[0]] + [arg for arg in sys.argv[1:] if arg != flag]
+        if flag == "--normalized":
+            _normalized_main()
+        else:
+            _bteh_main()
+        sys.exit(0)
+
     parser = argparse.ArgumentParser(description="Create global deep embeddings for elephant re-ID (step 2)")
     parser.add_argument(
         "--partition",
         type=str,
-        required=True,
+        default=None,
         choices=["query", "reference"],
-        help="Partition to embed: query or reference",
+        help="(Legacy giraffe mode) Partition to embed: query or reference",
     )
-    args = parser.parse_args()
-    main(args.partition)
+    mode_args = parser.parse_args()
+    if mode_args.partition is None:
+        parser.error(
+            "--partition is required for legacy giraffe mode "
+            "(or pass --normalized/--bteh)"
+        )
+    main(mode_args.partition)
