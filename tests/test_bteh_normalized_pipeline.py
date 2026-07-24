@@ -31,6 +31,7 @@ from pipeline.step_1_run_detection_to_crop import run_bteh_detection
 from pipeline.step_2_create_embeddings import (
     build_bteh_descriptor_artifacts,
     build_faiss_index,
+    embed_from_crop_manifest,
 )
 from pipeline.step_3_run_initial_matching import (
     _load_bteh_reference,
@@ -104,6 +105,20 @@ class _FakeEmbedder:
         mat = rng.random((len(images), self.dim)).astype(np.float32)
         norms = np.linalg.norm(mat, axis=1, keepdims=True)
         return mat / np.maximum(norms, 1e-8)
+
+
+class _MeanSideEmbedder:
+    dim = 2
+
+    def embed_batch(self, images, batch_size=32):
+        return np.asarray(
+            [
+                [float(image[:, : image.shape[1] // 2].mean()),
+                 float(image[:, image.shape[1] // 2 :].mean())]
+                for image in images
+            ],
+            dtype=np.float32,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -786,6 +801,37 @@ def test_matching_requires_each_applicable_descriptor_channel(tmp_path):
             skip_local=True,
             query_crop_manifest_path=str(query_crop_path),
         )
+
+
+def test_normalized_body_embedding_flips_right_viewpoint(tmp_path):
+    path = tmp_path / "asymmetric.jpg"
+    image = np.zeros((20, 20, 3), dtype=np.uint8)
+    image[:, 10:] = 255
+    assert cv2.imwrite(str(path), image)
+    crop = pd.DataFrame(
+        [
+            {
+                "crop_id": "img1__body_0",
+                "image_id": "img1",
+                "individual_id": "elephant_1",
+                "crop_kind": "body",
+                "crop_ordinal": 0,
+                "crop_path": str(path),
+                "detector_status": "accepted",
+                "schema_version": ARTIFACT_SCHEMA_VERSION,
+                "source_fingerprint": "source",
+                "split_fingerprint": "split",
+                "viewpoint": "right",
+            }
+        ]
+    )
+    _, matrix = embed_from_crop_manifest(
+        crop,
+        _MeanSideEmbedder(),
+        "body",
+        is_ear=False,
+    )
+    assert matrix[0, 0] > matrix[0, 1]
 
 
 # ---------------------------------------------------------------------------

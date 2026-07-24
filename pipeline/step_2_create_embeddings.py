@@ -43,6 +43,7 @@ from utils.artifact_schema import (
 logger = logging.getLogger(__name__)
 
 _BATCH_SIZE = 32
+BODY_VIEWPOINT_PREPROCESS_FINGERPRINT = "viewpoint-right-to-left-v1"
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +253,11 @@ def embed_from_crop_manifest(
             )
         if is_ear and apply_clahe_to_ear:
             image = _apply_clahe(image)
+        elif not is_ear and "viewpoint" in selected.columns:
+            image = _normalize_viewpoint(
+                image,
+                str(crop_row.get("viewpoint", "")),
+            )
         images.append(image)
         rows.append(crop_row)
 
@@ -350,7 +356,14 @@ def build_bteh_descriptor_artifacts(
     mapping_df["schema_version"] = schema_version
     mapping_df["source_fingerprint"] = resolved_source_fingerprint
     mapping_df["split_fingerprint"] = resolved_split_fingerprint
-    mapping_df["model_preprocess_fingerprint"] = model_fingerprint
+    effective_model_fingerprint = model_fingerprint
+    if not is_ear and "viewpoint" in crop_manifest.columns:
+        effective_model_fingerprint = (
+            f"{model_fingerprint}+{BODY_VIEWPOINT_PREPROCESS_FINGERPRINT}"
+            if model_fingerprint
+            else BODY_VIEWPOINT_PREPROCESS_FINGERPRINT
+        )
+    mapping_df["model_preprocess_fingerprint"] = effective_model_fingerprint
     if is_reference:
         mapping_df["faiss_row"] = pd.Series(
             range(len(mapping_df)), dtype=DESCRIPTOR_MAPPING_DTYPES["faiss_row"]
@@ -373,7 +386,7 @@ def build_bteh_descriptor_artifacts(
         schema_version=schema_version,
         expected_source_fingerprint=resolved_source_fingerprint,
         expected_split_fingerprint=resolved_split_fingerprint,
-        expected_model_fingerprint=model_fingerprint,
+        expected_model_fingerprint=effective_model_fingerprint,
     )
 
     os.makedirs(artifact_dir, exist_ok=True)

@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
-from PIL import Image
+from PIL import Image, ImageOps
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png"})
 SOURCE_SPLITS = ("train", "val")
 SOURCE_METADATA_COLUMNS = [
+    "pixel_hash",
     "source_class_id",
     "source_class_index",
     "source_split",
@@ -47,15 +48,18 @@ MANIFEST_COLUMNS = IMAGE_MANIFEST_COLUMNS + SOURCE_METADATA_COLUMNS
 
 _MONTHS = {
     "jan": 1,
+    "jna": 1,
     "january": 1,
     "feb": 2,
     "february": 2,
     "mar": 3,
     "march": 3,
     "apr": 4,
+    "pr": 4,
     "april": 4,
     "may": 5,
     "jun": 6,
+    "jne": 6,
     "june": 6,
     "jul": 7,
     "july": 7,
@@ -78,7 +82,7 @@ _DAY_FIRST_DATE_RE = re.compile(
 )
 _MONTH_DAY_YEAR_RE = re.compile(
     rf"(?i)(?P<month>{_MONTH_TOKEN})\s*(?P<day>\d{{1,2}})"
-    r"[\s_-]+(?P<year>\d{2,4})"
+    r"[\s_,-]+(?P<year>\d{2,4})"
 )
 _MONTH_YEAR_RE = re.compile(
     rf"(?i)(?P<month>{_MONTH_TOKEN})[\s_-]*(?P<year>20\d{{2}})"
@@ -117,6 +121,15 @@ def _perceptual_hash(path: Path) -> str | None:
         for column in range(8)
     ]
     return f"{int(''.join('1' if bit else '0' for bit in bits), 2):016x}"
+
+
+def _decoded_pixel_hash(path: Path) -> tuple[str, int, int]:
+    """Hash EXIF-oriented RGB pixels so metadata-only copies deduplicate."""
+    with Image.open(path) as image:
+        rgb = ImageOps.exif_transpose(image).convert("RGB")
+        width, height = rgb.size
+        payload = f"{width}x{height}:RGB:".encode("ascii") + rgb.tobytes()
+    return hashlib.sha256(payload).hexdigest(), width, height
 
 
 def _four_digit_year(value: str) -> int:
@@ -288,23 +301,61 @@ def _canonical_names(assignments: list[dict[str, str]]) -> dict[str, str]:
 def _apply_deduplication(manifest: pd.DataFrame) -> pd.DataFrame:
     manifest = manifest.copy()
     eligible = manifest[manifest["include_status"] == "included"]
-    for _, group in eligible.groupby("content_hash", dropna=True):
-        if len(group) < 2:
+    parent = {index: index for index in eligible.index}
+
+    def _find(index):
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def _union(first, second):
+        first_root = _find(first)
+        second_root = _find(second)
+        if first_root != second_root:
+            parent[second_root] = first_root
+
+    for key in ("content_hash", "pixel_hash"):
+        if key not in eligible.columns:
             continue
+        for _, group in eligible.groupby(key, dropna=True):
+            indexes = group.index.tolist()
+            for index in indexes[1:]:
+                _union(indexes[0], index)
+
+    components: dict[int, list[int]] = {}
+    for index in eligible.index:
+        components.setdefault(_find(index), []).append(index)
+
+    for indexes in components.values():
+        if len(indexes) < 2:
+            continue
+        group = manifest.loc[indexes]
+        same_content = group["content_hash"].nunique(dropna=True) == 1
         if group["individual_id"].nunique() > 1:
-            manifest.loc[group.index, "include_status"] = "review_required"
-            manifest.loc[group.index, "review_flag"] = True
-            manifest.loc[group.index, "review_reason"] = (
+            manifest.loc[indexes, "include_status"] = "review_required"
+            manifest.loc[indexes, "review_flag"] = True
+            manifest.loc[indexes, "review_reason"] = (
                 "cross_identity_exact_duplicate"
+                if same_content
+                else "cross_identity_exact_pixel_duplicate"
             )
             continue
-        indexes = group.sort_values("source_relative_path").index.tolist()
-        primary_index = indexes[0]
-        manifest.loc[primary_index, "include_status"] = "duplicate_primary"
+
+        sorted_indexes = group.sort_values(
+            "source_relative_path"
+        ).index.tolist()
+        primary_index = sorted_indexes[0]
         primary_id = manifest.loc[primary_index, "image_id"]
-        for index in indexes[1:]:
+        primary_content_hash = manifest.loc[primary_index, "content_hash"]
+        manifest.loc[primary_index, "include_status"] = "duplicate_primary"
+        for index in sorted_indexes[1:]:
             manifest.loc[index, "include_status"] = "excluded"
-            manifest.loc[index, "exclusion_reason"] = "exact_duplicate"
+            manifest.loc[index, "exclusion_reason"] = (
+                "exact_duplicate"
+                if manifest.loc[index, "content_hash"] == primary_content_hash
+                else "exact_pixel_duplicate"
+            )
             manifest.loc[index, "duplicate_of"] = primary_id
     return manifest
 
@@ -337,7 +388,9 @@ def validate_manifest(manifest: pd.DataFrame) -> list[str]:
     excluded = manifest["include_status"] == "excluded"
     if manifest.loc[excluded, "exclusion_reason"].isna().any():
         errors.append("excluded rows must have an exclusion_reason")
-    duplicate_rows = manifest["exclusion_reason"] == "exact_duplicate"
+    duplicate_rows = manifest["exclusion_reason"].isin(
+        {"exact_duplicate", "exact_pixel_duplicate"}
+    )
     valid_ids = set(manifest["image_id"])
     if not manifest.loc[duplicate_rows, "duplicate_of"].isin(valid_ids).all():
         errors.append("exact duplicates must reference a valid primary image_id")
@@ -368,16 +421,19 @@ def generate_manifest(
         date_match, capture_date = _date_match(filename)
         del date_match
         year = capture_date[:4] if capture_date else None
-        session_value = capture_date or "unknown"
+        session_id = (
+            f"{individual_id}_{capture_date}"
+            if capture_date
+            else None
+        )
 
         include_status = "included"
         exclusion_reason = None
+        pixel_hash = None
         width = None
         height = None
         try:
-            with Image.open(path) as image:
-                width, height = image.size
-                image.verify()
+            pixel_hash, width, height = _decoded_pixel_hash(path)
         except (OSError, ValueError):
             include_status = "excluded"
             exclusion_reason = "corrupt"
@@ -397,7 +453,7 @@ def generate_manifest(
                 ),
                 "image_id_path_component": path_hash,
                 "image_id_content_component": content_component,
-                "session_id": f"{individual_id}_{session_value}",
+                "session_id": session_id,
                 "capture_date": capture_date,
                 "year": year,
                 "session_source": "filename" if capture_date else "unknown",
@@ -411,6 +467,7 @@ def generate_manifest(
                 "ear_detection_status": "pending",
                 "image_width": width,
                 "image_height": height,
+                "pixel_hash": pixel_hash,
                 "source_class_id": class_id,
                 "source_class_index": class_mapping[class_id],
                 "source_split": assignment["source_split"],

@@ -67,11 +67,14 @@ def test_build_crop_partitions_assigns_all_active_images():
         ]
     )
     splits["session_id"] = ["session_gallery", "session_probe"]
+    splits["viewpoint"] = ["right", "left"]
     crops = pd.DataFrame([_crop("gallery"), _crop("probe")])
     crops["split_fingerprint"] = _fingerprint_df(splits)
     result = build_crop_partitions(crops, splits)
     assert set(result["reference"]["image_id"]) == {"gallery"}
     assert set(result["query"]["image_id"]) == {"probe"}
+    assert result["reference"].iloc[0]["viewpoint"] == "right"
+    assert result["query"].iloc[0]["viewpoint"] == "left"
 
 
 def test_build_crop_partitions_fails_missing_split():

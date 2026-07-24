@@ -9,6 +9,7 @@ from configs.config_elpephants import canonical_individual_id
 from pipeline.elpephants_manifest import (
     MANIFEST_COLUMNS,
     _apply_deduplication,
+    _date_match,
     generate_manifest,
     main,
     validate_manifest,
@@ -93,6 +94,32 @@ def test_generate_manifest_parses_date_name_and_viewpoint(synthetic_elpephants):
     assert row["viewpoint"] == "frontal"
 
 
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("1799_Hulweh I left head_24Jne2016.jpg", "2016-06-24"),
+        ("3410_Phaedra I left2_Jna2003.jpg", "2003-01"),
+        ("520_Bede right head_17pr2016.jpg", "2016-04-17"),
+        ("1617_Gryta I front_June 25, 2016.jpg", "2016-06-25"),
+    ],
+)
+def test_date_match_handles_known_source_typos(filename, expected):
+    _, capture_date = _date_match(filename)
+    assert capture_date == expected
+
+
+def test_undated_image_does_not_create_synthetic_session(tmp_path):
+    root = tmp_path / "ELPephants"
+    filename = "10_Ten left side.jpg"
+    _write_metadata(root, [("10", 0)], [("10", filename)], [])
+    _write_image(root / "images" / filename, (10, 20, 30))
+
+    manifest = generate_manifest(root, compute_phash=False)
+
+    assert pd.isna(manifest.iloc[0]["session_id"])
+    assert manifest.iloc[0]["session_source"] == "unknown"
+
+
 def test_generate_manifest_rejects_unassigned_image(synthetic_elpephants):
     _write_image(
         synthetic_elpephants / "images" / "183_Alvin_extra.jpg",
@@ -142,6 +169,67 @@ def test_cross_identity_exact_duplicates_require_review(tmp_path):
     assert (
         manifest["review_reason"] == "cross_identity_exact_duplicate"
     ).all()
+
+
+def test_metadata_only_image_copies_are_pixel_deduplicated(tmp_path):
+    root = tmp_path / "ELPephants"
+    first = "10_Ten left_Jan2010.jpg"
+    second = "10_Ten left_Feb2011.jpg"
+    _write_metadata(root, [("10", 0)], [("10", first)], [("10", second)])
+    _write_image(root / "images" / first, (10, 20, 30))
+    first_bytes = (root / "images" / first).read_bytes()
+    (root / "images" / second).write_bytes(first_bytes + b"metadata-padding")
+
+    manifest = generate_manifest(root, compute_phash=False)
+
+    assert manifest["content_hash"].nunique() == 2
+    assert manifest["pixel_hash"].nunique() == 1
+    assert set(manifest["include_status"]) == {
+        "duplicate_primary",
+        "excluded",
+    }
+    duplicate = manifest[
+        manifest["exclusion_reason"] == "exact_pixel_duplicate"
+    ].iloc[0]
+    primary = manifest[
+        manifest["include_status"] == "duplicate_primary"
+    ].iloc[0]
+    assert duplicate["duplicate_of"] == primary["image_id"]
+
+
+def test_mixed_byte_and_pixel_duplicate_component_is_fully_deduplicated(
+    tmp_path,
+):
+    root = tmp_path / "ELPephants"
+    names = [
+        "10_Ten left_Jan2010.jpg",
+        "10_Ten left_Feb2011.jpg",
+        "10_Ten left_Mar2012.jpg",
+    ]
+    _write_metadata(
+        root,
+        [("10", 0)],
+        [("10", names[0]), ("10", names[1])],
+        [("10", names[2])],
+    )
+    _write_image(root / "images" / names[0], (10, 20, 30))
+    first_bytes = (root / "images" / names[0]).read_bytes()
+    (root / "images" / names[1]).write_bytes(first_bytes)
+    (root / "images" / names[2]).write_bytes(
+        first_bytes + b"metadata-padding"
+    )
+
+    manifest = generate_manifest(root, compute_phash=False)
+
+    assert (manifest["include_status"] == "duplicate_primary").sum() == 1
+    assert (manifest["include_status"] == "excluded").sum() == 2
+    primary_id = manifest.loc[
+        manifest["include_status"] == "duplicate_primary",
+        "image_id",
+    ].iloc[0]
+    assert set(
+        manifest.loc[manifest["include_status"] == "excluded", "duplicate_of"]
+    ) == {primary_id}
 
 
 def test_cli_writes_manifest_and_sidecar(synthetic_elpephants, tmp_path):

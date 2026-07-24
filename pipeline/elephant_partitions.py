@@ -39,7 +39,13 @@ def build_crop_partitions(
     if splits["image_id"].duplicated().any():
         raise ValueError("split manifest image_id must be unique")
 
-    split_meta = splits[list(required_split_columns)]
+    optional_split_columns = {
+        "viewpoint",
+    } & set(splits.columns) - set(crop_manifest.columns)
+    split_meta_columns = sorted(
+        required_split_columns | optional_split_columns
+    )
+    split_meta = splits[split_meta_columns]
     merged = crop_manifest.merge(
         split_meta,
         on="image_id",
